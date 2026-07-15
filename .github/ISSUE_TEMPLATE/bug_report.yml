@@ -1,0 +1,26 @@
+name: Bug report
+description: 报告可复现的错误
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？期望行为是什么？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 复现步骤
+      description: 请提供最小且稳定的复现步骤、房间人数、模式和扩展信息。
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: 版本或提交
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 日志或回放
+      description: 请先移除令牌、密码和私人信息。

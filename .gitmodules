@@ -1,0 +1,3 @@
+[submodule "vendor/noname"]
+	path = vendor/noname
+	url = https://github.com/libnoname/noname.git

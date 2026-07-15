@@ -1,0 +1,10 @@
+{
+  "name": "无名杀自定义联机平台",
+  "short_name": "自定义杀",
+  "description": "朋友之间联机和创作武将的网页游戏平台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#991b1b",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

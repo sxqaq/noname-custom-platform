@@ -1,0 +1,19 @@
+name: Feature request
+description: 提议一个范围明确的新能力
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: 使用场景
+      description: 谁在什么情况下需要这个能力？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 规则或兼容依据
