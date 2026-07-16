@@ -44,7 +44,6 @@ test("host CLI supports LAN and installer paths without platform-specific env sy
       port: 4567,
       dataDir: "user-data",
       nodeName: "朋友房",
-      lanDiscovery: true,
     },
   );
   assert.throws(() => parseHostArgs(["--unknown"]));

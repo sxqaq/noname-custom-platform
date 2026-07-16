@@ -97,9 +97,41 @@ export function validatePackage(input: unknown): ValidationResult {
   });
   value.skills?.forEach((item, i) => {
     if (!validId(item.id)) errors.push(`技能 ${i + 1} ID 不合法`);
+    const kind = item.kind ?? "trigger";
+    if (kind === "trigger" && !item.event)
+      errors.push(`触发技能 ${item.name} 必须声明 event`);
+    if (kind === "active") {
+      if (item.event) errors.push(`主动技能 ${item.name} 不能声明 event`);
+      if ((item.selections?.length ?? 0) > 8)
+        errors.push(`主动技能 ${item.name} 的选择步骤不能超过 8 个`);
+      const selectionIds = new Set<string>();
+      item.selections?.forEach((selection, selectionIndex) => {
+        if (!validId(selection.id))
+          errors.push(
+            `主动技能 ${item.name} 的第 ${selectionIndex + 1} 个选择 ID 不合法`,
+          );
+        if (selectionIds.has(selection.id))
+          errors.push(`主动技能 ${item.name} 的选择 ID ${selection.id} 重复`);
+        selectionIds.add(selection.id);
+        if (!selection.prompt?.trim() || selection.prompt.length > 120)
+          errors.push(`主动技能 ${item.name} 的选择提示不合法`);
+        if (
+          !Number.isInteger(selection.min) ||
+          !Number.isInteger(selection.max) ||
+          selection.min < 0 ||
+          selection.max < selection.min ||
+          selection.max > 8
+        )
+          errors.push(`主动技能 ${item.name} 的选择数量不合法`);
+        if (selection.kind === "target" && !selection.targetFilter)
+          errors.push(`主动技能 ${item.name} 的目标选择缺少 targetFilter`);
+        if (selection.kind === "card" && !selection.cardZone)
+          errors.push(`主动技能 ${item.name} 的卡牌选择缺少 cardZone`);
+      });
+    }
     validateEffects(item.effects, `技能 ${item.name}`, errors);
-    if (item.effects.length > 64)
-      errors.push(`技能 ${item.name} 节点超过 64 个`);
+    if (countEffects(item.effects) > 256)
+      errors.push(`技能 ${item.name} 的全部分支节点不能超过 256 个`);
   });
   value.cards?.forEach((item, i) => {
     if (!validId(item.id)) errors.push(`卡牌 ${i + 1} ID 不合法`);
@@ -138,11 +170,22 @@ export function validatePackage(input: unknown): ValidationResult {
     ? { ok: false, errors }
     : { ok: true, value: structuredClone(value as ExtensionPackageDto) };
 }
-function validateEffects(effects: unknown, owner: string, errors: string[]) {
-  if (!Array.isArray(effects) || !effects.length) {
+function validateEffects(
+  effects: unknown,
+  owner: string,
+  errors: string[],
+  depth = 0,
+  allowEmpty = false,
+) {
+  if (depth > 8) {
+    errors.push(`${owner} 的效果嵌套不能超过 8 层`);
+    return;
+  }
+  if (!Array.isArray(effects) || (!effects.length && !allowEmpty)) {
     errors.push(`${owner} 至少需要一个效果节点`);
     return;
   }
+  if (!effects.length) return;
   effects.forEach((effect, index) => {
     if (
       !effect ||
@@ -151,7 +194,80 @@ function validateEffects(effects: unknown, owner: string, errors: string[]) {
       !("target" in effect)
     )
       errors.push(`${owner} 的节点 ${index + 1} 不合法`);
+    else {
+      const node = effect as {
+        type: string;
+        count?: unknown;
+        amount?: unknown;
+        mark?: unknown;
+      };
+      if (
+        !["draw", "recover", "damage", "addMark", "discard", "judge"].includes(
+          node.type,
+        )
+      )
+        errors.push(`${owner} 的节点 ${index + 1} 类型不支持`);
+      for (const [field, value] of [
+        ["count", node.count],
+        ["amount", node.amount],
+      ] as const)
+        if (
+          value !== undefined &&
+          (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 20)
+        )
+          errors.push(
+            `${owner} 的节点 ${index + 1} ${field} 必须为 0–20 的整数`,
+          );
+      if (
+        node.type === "addMark" &&
+        node.mark !== undefined &&
+        (typeof node.mark !== "string" || !validId(node.mark))
+      )
+        errors.push(`${owner} 的节点 ${index + 1} 标记 ID 不合法`);
+    }
+    if (effect.type === "judge") {
+      const judge = effect as {
+        target?: string;
+        successSuits?: unknown;
+        success?: unknown;
+        failure?: unknown;
+      };
+      if (judge.target === "allOthers")
+        errors.push(`${owner} 的判定节点不能以所有其他角色为目标`);
+      if (
+        !Array.isArray(judge.successSuits) ||
+        !judge.successSuits.length ||
+        judge.successSuits.some(
+          (suit) =>
+            !["spade", "heart", "club", "diamond"].includes(String(suit)),
+        )
+      )
+        errors.push(`${owner} 的判定节点花色条件不合法`);
+      validateEffects(
+        judge.success,
+        `${owner} 的判定成功分支`,
+        errors,
+        depth + 1,
+      );
+      if (judge.failure !== undefined)
+        validateEffects(
+          judge.failure,
+          `${owner} 的判定失败分支`,
+          errors,
+          depth + 1,
+          true,
+        );
+    }
   });
+}
+
+function countEffects(effects: unknown): number {
+  if (!Array.isArray(effects)) return 0;
+  return effects.reduce((total, effect) => {
+    if (!effect || typeof effect !== "object") return total + 1;
+    const node = effect as { success?: unknown; failure?: unknown };
+    return total + 1 + countEffects(node.success) + countEffects(node.failure);
+  }, 0);
 }
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;

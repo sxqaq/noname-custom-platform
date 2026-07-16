@@ -51,7 +51,7 @@ const pack = {
       name: "创作武将",
       faction: "qun",
       hp: 4,
-      skills: ["custom_e2e_skill"],
+      skills: ["custom_e2e_skill", "custom_e2e_active"],
     },
   ],
   skills: [
@@ -60,6 +60,35 @@ const pack = {
       name: "整备",
       event: "turnStart",
       effects: [{ id: "n1", type: "draw", target: "self", count: 1 }],
+    },
+    {
+      id: "custom_e2e_active",
+      name: "调度",
+      kind: "active",
+      usage: "oncePerTurn",
+      selections: [
+        {
+          id: "custom_e2e_cost",
+          prompt: "弃置一张手牌",
+          kind: "card",
+          min: 1,
+          max: 1,
+          cardZone: "hand",
+          consume: "discard",
+        },
+        {
+          id: "custom_e2e_target",
+          prompt: "选择一名其他角色",
+          kind: "target",
+          min: 1,
+          max: 1,
+          targetFilter: "other",
+        },
+      ],
+      effects: [
+        { id: "a1", type: "draw", target: "self", count: 2 },
+        { id: "a2", type: "damage", target: "selected", amount: 1 },
+      ],
     },
   ],
   cards: [
@@ -134,7 +163,7 @@ const guest = new Peer();
 await guest.wait("session.welcome");
 await guest.wait("packages.snapshot");
 guest.send("room.join", { roomId: hostRoom.payload.room.id, playerName: "乙" });
-await guest.wait("room.snapshot");
+const guestRoom = await guest.wait("room.snapshot");
 guest.send("room.ready", { ready: true });
 await guest.wait("room.snapshot");
 host.send("room.start", {});
@@ -170,6 +199,88 @@ const ownedCustomPlayer = ownerView.players.find(
 assert.ok(
   ownedCustomPlayer.hand.every((card) => card.name === "custom_e2e_card"),
 );
+const hostId = hostRoom.payload.selfPlayerId;
+const guestId = guestRoom.payload.selfPlayerId;
+const peerFor = (playerId) => (playerId === hostId ? host : guest);
+const waitBoth = async () => {
+  [hostView, guestView] = await Promise.all([
+    host.wait("game.snapshot").then((message) => message.payload),
+    guest.wait("game.snapshot").then((message) => message.payload),
+  ]);
+};
+for (let guard = 0; guard < 30; guard += 1) {
+  if (hostView.currentPlayerId === customPlayer.id && !hostView.pending) break;
+  const actionable = hostView.pending
+    ? hostView
+    : guestView.pending
+      ? guestView
+      : undefined;
+  if (actionable?.pending) {
+    const pending = actionable.pending;
+    const peer = peerFor(pending.playerId);
+    if (pending.kind === "guanxing")
+      peer.send("game.action", {
+        action: "arrangeCards",
+        topIds: pending.cards.map((card) => card.id),
+        bottomIds: [],
+      });
+    else if (pending.kind === "tuxi")
+      peer.send("game.action", {
+        action: "activateSkill",
+        skillId: "tuxi",
+        targetIds: [],
+      });
+    else peer.send("game.action", { action: "respond" });
+  } else
+    peerFor(hostView.currentPlayerId).send("game.action", {
+      action: "endTurn",
+    });
+  await waitBoth();
+}
+assert.equal(hostView.currentPlayerId, customPlayer.id);
+assert.equal(hostView.pending, undefined);
+const ownerPeer = peerFor(customPlayer.id);
+const target = hostView.players.find((player) => player.id !== customPlayer.id);
+const beforeActive = (
+  customPlayer.id === hostId ? hostView : guestView
+).players.find((player) => player.id === customPlayer.id);
+assert.ok(beforeActive.hand?.length);
+const handBeforeActive = beforeActive.hand.length;
+const hpBeforeActive = target.hp;
+ownerPeer.send("game.action", {
+  action: "activateSkill",
+  skillId: "custom_e2e_active",
+});
+await waitBoth();
+let activeOwnerView = customPlayer.id === hostId ? hostView : guestView;
+assert.equal(activeOwnerView.pending?.kind, "customSkill");
+ownerPeer.send("game.action", {
+  action: "activateSkill",
+  skillId: "custom_e2e_active",
+  cardIds: [
+    activeOwnerView.players.find((player) => player.id === customPlayer.id)
+      .hand[0].id,
+  ],
+});
+await waitBoth();
+activeOwnerView = customPlayer.id === hostId ? hostView : guestView;
+assert.equal(activeOwnerView.pending?.kind, "customSkill");
+ownerPeer.send("game.action", {
+  action: "activateSkill",
+  skillId: "custom_e2e_active",
+  targetIds: [target.id],
+});
+await waitBoth();
+activeOwnerView = customPlayer.id === hostId ? hostView : guestView;
+assert.equal(
+  activeOwnerView.players.find((player) => player.id === customPlayer.id).hand
+    .length,
+  handBeforeActive + 1,
+);
+assert.equal(
+  hostView.players.find((player) => player.id === target.id).hp,
+  hpBeforeActive - 1,
+);
 host.ws.close();
 guest.ws.close();
 console.log(
@@ -180,5 +291,6 @@ console.log(
     customMode: true,
     customDeck: true,
     generalSelection: true,
+    multiStepActiveSkill: true,
   }),
 );

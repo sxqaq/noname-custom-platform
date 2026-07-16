@@ -5,6 +5,7 @@ import type {
   ExtensionPackageDto,
   GeneralDto,
   ModeDefinitionDto,
+  SkillSelectionDto,
   SkillDto,
 } from "@sgs/protocol";
 
@@ -33,8 +34,56 @@ export const effect = {
     count = 1,
     target: EffectDto["target"] = "self",
   ): EffectDto => ({ type: "addMark", mark, count, target }),
+  judge: (
+    successSuits: Array<"spade" | "heart" | "club" | "diamond">,
+    success: EffectDto[],
+    failure: EffectDto[] = [],
+    target: EffectDto["target"] = "self",
+  ): EffectDto => ({
+    type: "judge",
+    target,
+    successSuits,
+    success,
+    failure,
+  }),
 };
 export const defineSkill = (value: SkillDto) => value;
+export const selection = {
+  target: (
+    id: string,
+    prompt: string,
+    options: {
+      min?: number;
+      max?: number;
+      filter?: NonNullable<SkillSelectionDto["targetFilter"]>;
+    } = {},
+  ): SkillSelectionDto => ({
+    id,
+    prompt,
+    kind: "target",
+    min: options.min ?? 1,
+    max: options.max ?? 1,
+    targetFilter: options.filter ?? "other",
+  }),
+  card: (
+    id: string,
+    prompt: string,
+    options: {
+      min?: number;
+      max?: number;
+      zone?: NonNullable<SkillSelectionDto["cardZone"]>;
+      consume?: NonNullable<SkillSelectionDto["consume"]>;
+    } = {},
+  ): SkillSelectionDto => ({
+    id,
+    prompt,
+    kind: "card",
+    min: options.min ?? 1,
+    max: options.max ?? 1,
+    cardZone: options.zone ?? "hand",
+    consume: options.consume ?? "none",
+  }),
+};
 export const defineGeneral = (value: GeneralDto) => value;
 export const defineCard = (value: CardDefinitionDto) => value;
 export const defineDeck = (value: DeckDefinitionDto) => value;

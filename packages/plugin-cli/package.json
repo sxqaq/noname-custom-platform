@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@sgs/content-schema": "*",
+    "@sgs/headless-engine": "*",
     "@sgs/script-sdk": "*",
     "tsx": "^4.19.4"
   },

@@ -31,6 +31,15 @@ node packages/plugin-cli/dist/index.js init .tmp-my-plugin
 
 生成的 `plugin.ts` 使用 `definePlugin`、`definePackage`、`defineGeneral`、`defineSkill` 和 `effect`。构建输出默认为 `dist/plugin.sgs.json`，可在网页创作工坊中导入、自动测试和发布。
 
+开发时可使用：
+
+```bash
+npx @sgs/plugin-cli watch plugin.ts
+npx @sgs/plugin-cli test plugin.ts
+```
+
+`watch` 在源码变化后重新编译，`test` 使用与服务器相同的无 DOM 规则引擎检查 Schema、确定性和插件声明的对局断言。仓库的 `examples/plugins/` 提供触发技、多段主动技和判定响应三个完整样例。
+
 ## 最小示例
 
 ```ts
@@ -81,4 +90,11 @@ export default definePlugin({
 - 编译器通过 `structuredClone` 拒绝函数等不可序列化值，再通过共享 Schema 校验内容。
 - CLI 子进程有 15 秒构建超时；服务端还会限制节点数量、图片尺寸和上传大小。
 
-当前 `rules-ir/v1` 已覆盖基础触发与摸牌、回复、伤害、弃牌、标记效果。条件、选择、判定和多段主动技能将以向后兼容的新 IR 节点加入；不会用“允许远程 JavaScript”绕过表达能力不足。
+当前 `rules-ir/v1` 已覆盖基础触发、摸牌、回复、伤害、弃牌和标记效果，也支持：
+
+- 多段主动技能的选牌与选目标步骤；每一步都进入快照，可断线恢复、AI 托管和逐命令回放。
+- 每回合使用次数、目标过滤、手牌/己方区域选牌，以及弃置费用。
+- 判定效果及成功/失败分支，并复用标准判定响应流程，因此可以被“鬼才”等技能响应。
+- 递归深度、分支节点、选择步骤、数量和伤害值配额，避免插件制造无界工作量。
+
+更复杂的通用条件表达式会以后向兼容的新 IR 节点继续扩展；不会用“允许远程 JavaScript”绕过表达能力不足。

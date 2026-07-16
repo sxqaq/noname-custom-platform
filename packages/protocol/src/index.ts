@@ -67,17 +67,33 @@ export interface RoomState extends RoomSummary {
 export type EffectTarget = "self" | "source" | "selected" | "allOthers";
 export interface EffectDto {
   id?: string;
-  type: "draw" | "recover" | "damage" | "addMark" | "discard";
+  type: "draw" | "recover" | "damage" | "addMark" | "discard" | "judge";
   count?: number;
   amount?: number;
   mark?: string;
   target: EffectTarget;
   next?: string;
+  successSuits?: Array<"spade" | "heart" | "club" | "diamond">;
+  success?: EffectDto[];
+  failure?: EffectDto[];
+}
+export interface SkillSelectionDto {
+  id: string;
+  prompt: string;
+  kind: "target" | "card";
+  min: number;
+  max: number;
+  targetFilter?: "self" | "other" | "any" | "wounded";
+  cardZone?: "hand" | "own";
+  consume?: "none" | "discard";
 }
 export interface SkillDto {
   id: string;
   name: string;
-  event: "turnStart" | "afterDamage" | "afterUseSha";
+  kind?: "trigger" | "active";
+  event?: "turnStart" | "afterDamage" | "afterUseSha";
+  usage?: "unlimited" | "oncePerTurn";
+  selections?: SkillSelectionDto[];
   effects: EffectDto[];
   graph?: { entry: string; nodes: EffectDto[] };
 }
@@ -355,6 +371,16 @@ export interface GameView {
         responderIndex: number;
       }
     | { playerId: string; kind: "guanxing"; cards: CardView[] }
+    | {
+        playerId: string;
+        kind: "customSkill";
+        skillId: string;
+        skillName: string;
+        stepIndex: number;
+        selection: SkillSelectionDto;
+        selectedCardIds: string[];
+        selectedTargetIds: string[];
+      }
     | { playerId: string; kind: "discard"; count: number };
   deckCount: number;
   discard: CardView[];

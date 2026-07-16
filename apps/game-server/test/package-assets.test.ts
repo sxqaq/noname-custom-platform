@@ -38,3 +38,24 @@ test("package publication accepts content-addressed assets present on the host",
   );
   assert.equal(registry.publish(content).content.assets?.[0].hash, hash);
 });
+
+test("plugin effect quotas reject unbounded work before server execution", () => {
+  const registry = new PackageRegistry();
+  assert.throws(
+    () =>
+      registry.publish({
+        ...content,
+        id: "custom.quota_test",
+        assets: [],
+        skills: [
+          {
+            id: "custom.too_much",
+            name: "无限工作",
+            event: "turnStart",
+            effects: [{ type: "draw", target: "self", count: 1_000_000 }],
+          },
+        ],
+      }),
+    /0–20/,
+  );
+});

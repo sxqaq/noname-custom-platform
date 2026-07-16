@@ -30,3 +30,31 @@ export default definePlugin({ engineApi: "rules-ir/v1", capabilities: ["rules"],
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("trigger, multi-step active and judgment reference plugins compile", async () => {
+  const repository = resolve("../..");
+  const runner = resolve("src/runner.ts");
+  const root = await mkdtemp(resolve(repository, ".tmp-plugin-examples-"));
+  try {
+    for (const name of [
+      "trigger-skill",
+      "multi-step-active",
+      "judgment-response",
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--import",
+          import.meta.resolve("tsx"),
+          runner,
+          resolve(repository, `examples/plugins/${name}.ts`),
+          join(root, `${name}.sgs.json`),
+        ],
+        { cwd: repository, encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, `${name}: ${result.stderr}`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

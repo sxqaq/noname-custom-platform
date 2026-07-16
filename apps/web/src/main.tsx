@@ -532,11 +532,16 @@ function App() {
               </div>
               <div className="actions">
                 <button
-                  onClick={() =>
-                    navigator.clipboard?.writeText(
-                      `${location.origin}/?room=${room.id}`,
-                    )
-                  }
+                  onClick={() => {
+                    const target = new URL(location.origin);
+                    target.searchParams.set("room", room.id);
+                    if (hostInfo)
+                      target.searchParams.set(
+                        "fingerprint",
+                        hostInfo.fingerprint,
+                      );
+                    void navigator.clipboard?.writeText(target.href);
+                  }}
                 >
                   复制邀请链接
                 </button>
@@ -662,6 +667,10 @@ function GameTable({
   const selected = me?.hand?.find((card) => card.id === selectedCard);
   const myTurn = game.currentPlayerId === selfId && game.phase === "play";
   const choosingTuxi = game.pending?.kind === "tuxi";
+  const customSkillPending =
+    game.pending?.kind === "customSkill" ? game.pending : undefined;
+  const choosingCustomTarget = customSkillPending?.selection.kind === "target";
+  const choosingCustomCard = customSkillPending?.selection.kind === "card";
   const mustRespond = Boolean(
     game.pending &&
     game.pending.kind !== "discard" &&
@@ -678,6 +687,7 @@ function GameTable({
     game.pending.kind !== "optionalTrigger" &&
     game.pending.kind !== "jianxiong" &&
     game.pending.kind !== "yijiChoice" &&
+    game.pending.kind !== "customSkill" &&
     game.pending.kind !== "selectGeneral",
   );
   const mustChooseWugu = game.pending?.kind === "wugu";
@@ -764,6 +774,14 @@ function GameTable({
     ) ?? []),
     ...(me?.equipment?.weapon?.name === "zhangba" ? ["zhangba"] : []),
   ];
+  const customActiveSkills = packages
+    .flatMap((item) => item.content.skills)
+    .filter(
+      (skill, index, all) =>
+        skill.kind === "active" &&
+        me?.general.skills.includes(skill.id) &&
+        all.findIndex((candidate) => candidate.id === skill.id) === index,
+    );
   return (
     <div className="game">
       <div className="gameMeta">
@@ -808,7 +826,14 @@ function GameTable({
               </small>
             )}
             {((myTurn && selectedSkill) ||
-              (choosingTuxi && player.id !== selfId && player.handCount > 0)) &&
+              (choosingTuxi && player.id !== selfId && player.handCount > 0) ||
+              (choosingCustomTarget &&
+                (customSkillPending.selection.targetFilter !== "self" ||
+                  player.id === selfId) &&
+                (customSkillPending.selection.targetFilter !== "other" ||
+                  player.id !== selfId) &&
+                (customSkillPending.selection.targetFilter !== "wounded" ||
+                  player.hp < player.maxHp))) &&
               player.alive && (
                 <button
                   className={
@@ -888,7 +913,7 @@ function GameTable({
                     ? current.filter((id) => id !== card.id)
                     : [...current, card.id],
                 );
-              } else if (selectedSkill) {
+              } else if (selectedSkill || choosingCustomCard) {
                 setSkillCards((current) =>
                   current.includes(card.id)
                     ? current.filter((id) => id !== card.id)
@@ -906,10 +931,12 @@ function GameTable({
             </small>
           </button>
         ))}
-        {selectedSkill &&
+        {((selectedSkill &&
           ["zhiheng", "lijian", "wusheng", "qixi", "guose"].includes(
             selectedSkill,
-          ) &&
+          )) ||
+          (choosingCustomCard &&
+            customSkillPending.selection.cardZone === "own")) &&
           Object.values(me?.equipment ?? {}).map((card) => (
             <button
               className={
@@ -1375,6 +1402,19 @@ function GameTable({
             </button>
           )}
         {myTurn &&
+          customActiveSkills.map((skill) => (
+            <button
+              className="secondary"
+              key={skill.id}
+              disabled={Boolean(me?.marks[`used.${skill.id}`])}
+              onClick={() =>
+                act({ action: "activateSkill", skillId: skill.id })
+              }
+            >
+              插件技能：{skill.name}
+            </button>
+          ))}
+        {myTurn &&
           activeSkills.map((skill) => (
             <button
               className={selectedSkill === skill ? "selected" : "secondary"}
@@ -1420,6 +1460,45 @@ function GameTable({
           >
             发动突袭（已选 {skillTargets.length}/2 个目标，可选 0 个）
           </button>
+        )}
+        {customSkillPending && (
+          <div className="notice">
+            <strong>{customSkillPending.skillName}</strong>
+            <span>{customSkillPending.selection.prompt}</span>
+            <button
+              disabled={
+                (customSkillPending.selection.kind === "card"
+                  ? skillCards.length
+                  : skillTargets.length) < customSkillPending.selection.min ||
+                (customSkillPending.selection.kind === "card"
+                  ? skillCards.length
+                  : skillTargets.length) > customSkillPending.selection.max
+              }
+              onClick={() => {
+                act({
+                  action: "activateSkill",
+                  skillId: customSkillPending.skillId,
+                  cardIds:
+                    customSkillPending.selection.kind === "card"
+                      ? skillCards
+                      : undefined,
+                  targetIds:
+                    customSkillPending.selection.kind === "target"
+                      ? skillTargets
+                      : undefined,
+                });
+                setSkillCards([]);
+                setSkillTargets([]);
+              }}
+            >
+              确认选择（
+              {customSkillPending.selection.kind === "card"
+                ? skillCards.length
+                : skillTargets.length}
+              /{customSkillPending.selection.min}–
+              {customSkillPending.selection.max}）
+            </button>
+          </div>
         )}
         {mustRespond &&
           Object.values(me?.equipment ?? {})

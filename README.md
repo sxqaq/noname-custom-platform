@@ -32,7 +32,8 @@
 - JSON 导入/导出、不可覆盖版本、SHA-256 内容锁和分享 ID。
 - `@sgs/script-sdk` 将高级 TypeScript 创作编译成声明式 DSL。
 - 武将立绘上传后安全解码、统一为 WebP、生成缩略图并按 SHA-256 存储；加入者从房主节点按哈希加载和缓存。
-- `@sgs/plugin-cli` 提供代码插件模板与编译命令，产物可直接导入网页工坊；联机只分发无函数规则 IR。
+- `@sgs/plugin-cli` 提供代码插件模板、监听构建和确定性测试，产物可直接导入网页工坊；联机只分发无函数规则 IR。
+- 插件 IR 支持触发技、多段选牌/选目标主动技、每回合次数、判定分支和标准判定响应。
 
 ### 交付能力
 
@@ -124,7 +125,7 @@ npm.cmd run installer:win
 
 ## 开放代码插件
 
-代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译为确定性规则 IR。服务端与远程玩家均不执行作者源码。模板、命令、信任边界和示例见 [插件 SDK](docs/plugin-sdk.md)。
+代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译为确定性规则 IR。服务端与远程玩家均不执行作者源码。触发技、多段主动技和判定响应样例位于 `examples/plugins/`；模板、命令和信任边界见 [插件 SDK](docs/plugin-sdk.md)。
 
 ## 测试与验收
 
@@ -149,7 +150,7 @@ node scripts/e2e-smoke.mjs
 node scripts/e2e-content.mjs
 ```
 
-当前验收结果：104 项工作区测试通过；真实双客户端房间与自定义内容 E2E 通过；Windows 安装、独立主机健康检查和卸载闭环通过。既有的 10,000 局 2–8 人 AI 对局全部结束、零死锁，前 100 局逐命令回放与原快照一致。详细内容见 [去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段 0–4 验收](docs/acceptance.md)。
+当前验收结果：109 项工作区测试通过；真实双客户端房间与自定义内容 E2E 通过，其中多段代码插件通过在线 WebSocket 完成选牌、选目标和效果结算；Windows 安装、独立主机健康检查和卸载闭环通过。既有的 10,000 局 2–8 人 AI 对局全部结束、零死锁，前 100 局逐命令回放与原快照一致。详细内容见 [去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段 0–4 验收](docs/acceptance.md)。
 
 ## 安全与数据说明
 
