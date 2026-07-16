@@ -1,14 +1,98 @@
-.workshop { width: 100%; }
-.workshopHeader { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-.subnav { margin: 10px 0 20px; }
-.nodeGraph { display: flex; align-items: stretch; gap: 8px; overflow: auto; padding: 18px 0; }
-.nodeWrap { display: flex; align-items: center; gap: 8px; }
-.node { min-width: 170px; border: 2px solid #d1d5db; border-radius: 8px; padding: 12px; background: #fafafa; display: flex; flex-direction: column; gap: 7px; }
-.node.trigger { border-color: #991b1b; background: #fff1f2; }
-.node input, .node select { margin: 0; }
-.arrow { font-size: 24px; color: #991b1b; }
-.split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
-.deckRow { display: grid; grid-template-columns: 1fr 100px; align-items: center; gap: 8px; }
-.library { max-height: 300px; overflow: auto; }
-.replay { border-top: 1px solid #ddd; margin-top: 20px; padding-top: 15px; }
-@media (max-width: 760px) { .workshopHeader { flex-direction: column; } .nodeGraph { flex-direction: column; } .nodeWrap { flex-direction: column; } .arrow { transform: rotate(90deg); } .split { grid-template-columns: 1fr; } }
+.workshop {
+  width: 100%;
+}
+.workshopHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+}
+.subnav {
+  margin: 10px 0 20px;
+}
+.nodeGraph {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  overflow: auto;
+  padding: 18px 0;
+}
+.nodeWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.node {
+  min-width: 170px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.node.trigger {
+  border-color: #991b1b;
+  background: #fff1f2;
+}
+.node input,
+.node select {
+  margin: 0;
+}
+.arrow {
+  font-size: 24px;
+  color: #991b1b;
+}
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+.deckRow {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  align-items: center;
+  gap: 8px;
+}
+.library {
+  max-height: 300px;
+  overflow: auto;
+}
+.replay {
+  border-top: 1px solid #ddd;
+  margin-top: 20px;
+  padding-top: 15px;
+}
+.generalPortrait {
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.choicePortrait {
+  width: 42px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+@media (max-width: 760px) {
+  .workshopHeader {
+    flex-direction: column;
+  }
+  .nodeGraph {
+    flex-direction: column;
+  }
+  .nodeWrap {
+    flex-direction: column;
+  }
+  .arrow {
+    transform: rotate(90deg);
+  }
+  .split {
+    grid-template-columns: 1fr;
+  }
+}

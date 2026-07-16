@@ -10,11 +10,26 @@ import { HeadlessGame, type ContentPackage } from "@sgs/headless-engine";
 
 export class PackageRegistry {
   private versions = new Map<string, PublishedPackage>();
-  constructor(private readonly storageFile?: string) {
+  constructor(
+    private readonly storageFile?: string,
+    private readonly assetExists?: (hash: string) => boolean,
+  ) {
     if (storageFile) this.load();
   }
   publish(input: unknown) {
     const validated = validatePackage(input);
+    if (validated.ok) {
+      for (const asset of validated.value.assets ?? []) {
+        if (this.assetExists && !this.assetExists(asset.hash))
+          throw new PackageError(`扩展引用的资源不存在：${asset.id}`);
+        if (
+          this.assetExists &&
+          asset.thumbnailHash &&
+          !this.assetExists(asset.thumbnailHash)
+        )
+          throw new PackageError(`扩展引用的缩略图不存在：${asset.id}`);
+      }
+    }
     if (!validated.ok) throw new PackageError(validated.errors.join("；"));
     const testResult = this.test(validated.value);
     if (testResult.failed)

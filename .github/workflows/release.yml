@@ -1,0 +1,32 @@
+name: Release Windows installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run installer:win
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifacts = Get-ChildItem release -File | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" $artifacts --generate-notes --verify-tag

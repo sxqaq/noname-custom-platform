@@ -10,6 +10,7 @@
 - 网页端优先，同时保持 PWA、移动外壳和桌面外壳的架构扩展能力。
 - 客户端只负责展示与提交操作；身份、随机数、牌局状态和胜负全部由服务端决定。
 - 扩展内容使用声明式 DSL；服务器不执行扩展作者提交的 JavaScript。
+- 每个完整安装版都是独立节点；任意安装者都可以作为本地权威房主，不依赖中央房间服务。
 
 ## 已实现内容
 
@@ -30,28 +31,34 @@
 - 与服务端共用规则内核的本地预览及扩展自动测试。
 - JSON 导入/导出、不可覆盖版本、SHA-256 内容锁和分享 ID。
 - `@sgs/script-sdk` 将高级 TypeScript 创作编译成声明式 DSL。
+- 武将立绘上传后安全解码、统一为 WebP、生成缩略图并按 SHA-256 存储；加入者从房主节点按哈希加载和缓存。
+- `@sgs/plugin-cli` 提供代码插件模板与编译命令，产物可直接导入网页工坊；联机只分发无函数规则 IR。
 
 ### 交付能力
 
 - React Web 客户端、PWA manifest 和 Service Worker 应用外壳缓存。
 - 单端口生产服务：网页、HTTP API 和 WebSocket 由同一服务提供。
 - Docker 单机部署和可持久化扩展内容库。
-- 平台能力桥已隔离文件、分享和存储 API，便于未来接入 Capacitor/Tauri。
+- 持久 Ed25519 节点身份、指纹校验、手动地址连接和 `_noname-sgs._tcp.local` 局域网发现。
+- Windows x64 NSIS 安装版内置 Electron、网页和 Host Runtime；默认仅本机监听，可在菜单明确切换为局域网主机。
+- 标签发布工作流会在 GitHub Windows runner 重新测试、构建并把安装器附加到 GitHub Release。
 
 ## 明确不在当前范围
 
-注册账号、匹配、排位、反作弊、公开扩展审核、举报、版权工单、公共社区、Capacitor/Tauri 安装包以及公共大服的横向扩容。
+注册账号、匹配、排位、反作弊、公开扩展审核、举报、版权工单、公共社区、移动端安装包、Tauri 外壳以及公共大服的横向扩容。互联网 NAT 穿透和可替换中继仍在后续阶段；当前稳定目标是本机和局域网朋友房。
 
 ## 技术架构
 
 ```text
 apps/web                  React 网页、大厅、牌桌、回放、创作工坊
 apps/game-server          会话、房间、内容仓库、权威对局、WebSocket
+apps/desktop              Electron 节点控制、内置 Host Runtime、Windows 安装版
 packages/headless-engine  无 DOM、种子随机、快照与规则内核
 packages/protocol         客户端/服务端共享协议
 packages/content-schema   扩展 Schema、校验与内容哈希
 packages/noname-adapter   无名杀兼容边界
 packages/script-sdk       高级创作 API 到安全 DSL 的编译层
+packages/plugin-cli       TypeScript 插件模板、编译和兼容校验 CLI
 vendor/noname             固定提交的上游 Git submodule
 ```
 
@@ -100,6 +107,25 @@ Docker：
 docker compose up -d --build
 ```
 
+局域网主机（源码运行）：
+
+```bash
+npm run build
+npm run host:lan -w @sgs/game-server
+```
+
+## Windows 安装版
+
+```powershell
+npm.cmd run installer:win
+```
+
+安装器输出到 `release/`。桌面应用默认是仅本机模式；在“主机”菜单选择“局域网主机模式”后才会绑定局域网地址。构建、数据目录、安装/卸载验收和代码签名说明见 [Windows 安装版](docs/windows-installer.md)。
+
+## 开放代码插件
+
+代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译为确定性规则 IR。服务端与远程玩家均不执行作者源码。模板、命令、信任边界和示例见 [插件 SDK](docs/plugin-sdk.md)。
+
 ## 测试与验收
 
 ```bash
@@ -123,7 +149,7 @@ node scripts/e2e-smoke.mjs
 node scripts/e2e-content.mjs
 ```
 
-当前验收结果：90 项工作区测试通过；含选将的 10,000 局 2–8 人 AI 对局全部结束、零死锁，前 100 局逐命令回放与原快照一致。详细内容见 [标准身份局验收](docs/standard-content-progress.md)和[阶段 0–4 验收](docs/acceptance.md)。
+当前验收结果：104 项工作区测试通过；真实双客户端房间与自定义内容 E2E 通过；Windows 安装、独立主机健康检查和卸载闭环通过。既有的 10,000 局 2–8 人 AI 对局全部结束、零死锁，前 100 局逐命令回放与原快照一致。详细内容见 [去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段 0–4 验收](docs/acceptance.md)。
 
 ## 安全与数据说明
 

@@ -1,4 +1,40 @@
 export type PlayerStatus = "not_ready" | "ready" | "playing" | "offline";
+export interface HostInfoDto {
+  protocolVersion: 1;
+  nodeName: string;
+  nodeId: string;
+  fingerprint: string;
+  publicKey: string;
+  authority: "room-host";
+  port: number;
+  capabilities: string[];
+}
+export interface LanNodeDto {
+  nodeId: string;
+  fingerprint: string;
+  name: string;
+  host: string;
+  port: number;
+  addresses: string[];
+  urls: string[];
+  protocolVersion: number;
+}
+export type AssetKind = "portrait" | "card-face" | "audio" | "other";
+export interface AssetRecordDto {
+  hash: string;
+  thumbnailHash?: string;
+  mediaType: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+  originalName: string;
+  kind: AssetKind;
+  author?: string;
+  license?: string;
+}
+export interface ExtensionAssetDto extends AssetRecordDto {
+  id: string;
+}
 export interface ContentLock {
   packageId: string;
   name: string;
@@ -52,6 +88,7 @@ export interface GeneralDto {
   hp: number;
   skills: string[];
   gender?: "male" | "female";
+  portraitAssetId?: string;
 }
 export interface CardDefinitionDto {
   id: string;
@@ -92,7 +129,7 @@ export interface ExtensionTestDto {
   };
 }
 export interface ExtensionPackageDto {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   id: string;
   name: string;
   version: string;
@@ -102,6 +139,7 @@ export interface ExtensionPackageDto {
   decks: DeckDefinitionDto[];
   modes: ModeDefinitionDto[];
   tests: ExtensionTestDto[];
+  assets?: ExtensionAssetDto[];
 }
 export interface PublishedPackage {
   content: ExtensionPackageDto;
@@ -379,7 +417,11 @@ export type ClientMessage =
         | { action: "discardCards"; cardIds: string[] }
         | { action: "endTurn" };
     }
-  | { type: "package.publish"; requestId: string; payload: ExtensionPackageDto }
+  | {
+      type: "package.publish";
+      requestId: string;
+      payload: { package: ExtensionPackageDto; adminToken: string };
+    }
   | { type: "package.test"; requestId: string; payload: ExtensionPackageDto }
   | {
       type: "replay.open";

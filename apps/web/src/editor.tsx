@@ -1,16 +1,18 @@
 import { useMemo, useRef, useState } from "react";
 import { HeadlessGame } from "@sgs/headless-engine";
 import type {
+  AssetRecordDto,
   EffectDto,
   ExtensionPackageDto,
   PublishedPackage,
 } from "@sgs/protocol";
 
 const emptyPackage = (): ExtensionPackageDto => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: "custom.my_pack",
   name: "我的创作包",
   version: "1.0.0",
+  assets: [],
   generals: [
     {
       id: "custom_general",
@@ -87,17 +89,23 @@ export function ExtensionEditor({
   publish,
   runTests,
   testResult,
+  uploadImage,
 }: {
   packages: PublishedPackage[];
   publish: (value: ExtensionPackageDto) => void;
   runTests: (value: ExtensionPackageDto) => void;
   testResult?: TestResult;
+  uploadImage: (
+    file: File,
+    kind: "portrait" | "card-face",
+  ) => Promise<AssetRecordDto>;
 }) {
   const [value, setValue] = useState(emptyPackage);
   const [section, setSection] = useState<
     "general" | "nodes" | "cards" | "mode" | "json"
   >("general");
   const [preview, setPreview] = useState<string>();
+  const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const general = value.generals[0];
   const skill = value.skills[0];
@@ -128,8 +136,36 @@ export function ExtensionEditor({
     URL.revokeObjectURL(url);
   };
   const importFile = async (file?: File) => {
-    if (file) setValue(JSON.parse(await file.text()) as ExtensionPackageDto);
+    if (!file) return;
+    const document = JSON.parse(await file.text()) as
+      | ExtensionPackageDto
+      | { format: "sgs-compiled-plugin"; content: ExtensionPackageDto };
+    const imported = "content" in document ? document.content : document;
+    setValue({ ...imported, schemaVersion: 3, assets: imported.assets ?? [] });
   };
+  const uploadPortrait = async (file?: File) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const record = await uploadImage(file, "portrait");
+      const assetId = `${general.id}.portrait`;
+      update("assets", [
+        ...(value.assets ?? []).filter((item) => item.id !== assetId),
+        { id: assetId, ...record },
+      ]);
+      patchGeneral({ portraitAssetId: assetId });
+      setPreview(
+        "武将立绘已安全处理并保存到当前主机。发布扩展后，房间玩家会按哈希获取它。",
+      );
+    } catch (error) {
+      setPreview(error instanceof Error ? error.message : "图片上传失败");
+    } finally {
+      setUploading(false);
+    }
+  };
+  const portrait = value.assets?.find(
+    (item) => item.id === general.portraitAssetId,
+  );
   const localTest = () => {
     try {
       const game = HeadlessGame.create({
@@ -302,6 +338,29 @@ export function ExtensionEditor({
               onChange={(e) => patchSkill({ name: e.target.value })}
             />
           </label>
+          <label>
+            武将立绘
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/avif"
+              disabled={uploading}
+              onChange={(event) => void uploadPortrait(event.target.files?.[0])}
+            />
+            <small>
+              {uploading
+                ? "正在处理图片…"
+                : "最大 10 MiB；上传后统一转为安全 WebP"}
+            </small>
+          </label>
+          {portrait && (
+            <figure>
+              <img
+                src={`/api/assets/${portrait.thumbnailHash ?? portrait.hash}`}
+                alt={`${general.name}立绘预览`}
+              />
+              <figcaption>sha256: {portrait.hash.slice(0, 12)}…</figcaption>
+            </figure>
+          )}
         </div>
       )}
       {section === "nodes" && (

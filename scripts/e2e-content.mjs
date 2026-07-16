@@ -107,10 +107,13 @@ const pack = {
 const host = new Peer();
 await host.wait("session.welcome");
 await host.wait("packages.snapshot");
+const { adminToken } = await fetch(
+  "http://localhost:3001/api/admin/token",
+).then((response) => response.json());
 host.send("package.test", pack);
 const tests = await host.wait("package.test-result");
 assert.equal(tests.payload.failed, 0);
-host.send("package.publish", pack);
+host.send("package.publish", { package: pack, adminToken });
 const library = await host.wait("packages.snapshot", (message) =>
   message.payload.some((item) => item.content.id === pack.id),
 );

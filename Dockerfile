@@ -8,7 +8,7 @@ RUN npm run build
 
 FROM node:22-alpine
 WORKDIR /app
-ENV NODE_ENV=production PORT=3001 WEB_DIST=/app/apps/web/dist DATA_DIR=/data
+ENV NODE_ENV=production HOST_BIND=0.0.0.0 PORT=3001 WEB_DIST=/app/apps/web/dist DATA_DIR=/data
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/game-server/dist ./apps/game-server/dist

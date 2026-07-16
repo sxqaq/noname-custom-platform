@@ -10,7 +10,8 @@ export function validatePackage(input: unknown): ValidationResult {
   const value = input as Partial<ExtensionPackageDto>;
   if (!value || typeof value !== "object")
     return { ok: false, errors: ["扩展包必须是对象"] };
-  if (value.schemaVersion !== 2) errors.push("schemaVersion 必须为 2");
+  if (value.schemaVersion !== 2 && value.schemaVersion !== 3)
+    errors.push("schemaVersion 必须为 2 或 3");
   if (!validId(value.id)) errors.push("扩展 ID 不合法");
   if (!value.name?.trim()) errors.push("扩展名称不能为空");
   if (!value.version || !/^\d+\.\d+\.\d+$/.test(value.version))
@@ -25,6 +26,9 @@ export function validatePackage(input: unknown): ValidationResult {
   ] as const)
     if (!Array.isArray(value[key])) errors.push(`${key} 必须是数组`);
   const skillIds = new Set(value.skills?.map((item) => item.id));
+  const assetIds = new Set(value.assets?.map((item) => item.id));
+  if (value.schemaVersion === 3 && !Array.isArray(value.assets))
+    errors.push("schemaVersion 3 的 assets 必须是数组");
   const cardIds = new Set([
     "sha",
     "shan",
@@ -72,6 +76,24 @@ export function validatePackage(input: unknown): ValidationResult {
       if (!skillIds.has(id))
         errors.push(`武将 ${item.name} 引用了不存在的技能 ${id}`);
     });
+    if (item.portraitAssetId && !assetIds.has(item.portraitAssetId))
+      errors.push(
+        `武将 ${item.name} 引用了不存在的立绘资源 ${item.portraitAssetId}`,
+      );
+  });
+  const seenAssets = new Set<string>();
+  value.assets?.forEach((item, i) => {
+    if (!validId(item.id)) errors.push(`资源 ${i + 1} ID 不合法`);
+    if (seenAssets.has(item.id)) errors.push(`资源 ID ${item.id} 重复`);
+    seenAssets.add(item.id);
+    if (!/^[a-f0-9]{64}$/.test(item.hash))
+      errors.push(`资源 ${item.id} 哈希不合法`);
+    if (item.thumbnailHash && !/^[a-f0-9]{64}$/.test(item.thumbnailHash))
+      errors.push(`资源 ${item.id} 缩略图哈希不合法`);
+    if (!Number.isInteger(item.bytes) || item.bytes < 1)
+      errors.push(`资源 ${item.id} 大小不合法`);
+    if (!item.mediaType?.startsWith("image/") && item.kind !== "audio")
+      errors.push(`资源 ${item.id} 媒体类型不合法`);
   });
   value.skills?.forEach((item, i) => {
     if (!validId(item.id)) errors.push(`技能 ${i + 1} ID 不合法`);

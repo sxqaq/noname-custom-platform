@@ -1,0 +1,67 @@
+{
+  "name": "@sgs/desktop",
+  "version": "0.2.0",
+  "description": "去中心化、可自定义内容的朋友房网页联机主机与客户端",
+  "author": "Noname Custom Platform contributors",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "electron .",
+    "dist:win": "node ../../scripts/build-windows-installer.mjs",
+    "pack:win": "electron-builder --win dir --x64"
+  },
+  "dependencies": {
+    "@sgs/game-server": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "electron": "43.1.1",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "org.noname.customplatform",
+    "productName": "无名杀自定义联机平台",
+    "artifactName": "Noname-Custom-Platform-${version}-${arch}-Setup.${ext}",
+    "directories": {
+      "output": "../../release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/sharp/**/*"
+    ],
+    "win": {
+      "executableName": "NonameCustomPlatform",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "无名杀自定义联机平台",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type {
+  AssetKind,
+  AssetRecordDto,
   ClientMessage,
   GameView,
+  HostInfoDto,
+  LanNodeDto,
   PublishedPackage,
   ReplayDto,
   RoomState,
@@ -15,7 +19,8 @@ import "./workshop.css";
 
 const WS_URL =
   import.meta.env.VITE_WS_URL ??
-  `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}${location.port === "5173" ? ":3001" : location.port ? `:${location.port}` : ""}/ws`;
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+const HOST_HTTP_ORIGIN = import.meta.env.VITE_HOST_URL ?? location.origin;
 const id = () => crypto.randomUUID();
 type Tab = "lobby" | "editor" | "replays";
 function App() {
@@ -23,6 +28,11 @@ function App() {
   const retry = useRef(0);
   const inviteAttempted = useRef(false);
   const [connected, setConnected] = useState(false);
+  const [hostInfo, setHostInfo] = useState<HostInfoDto>();
+  const [adminToken, setAdminToken] = useState("");
+  const [lanNodes, setLanNodes] = useState<LanNodeDto[]>([]);
+  const [discoveringLan, setDiscoveringLan] = useState(false);
+  const [manualNodeAddress, setManualNodeAddress] = useState("");
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [room, setRoom] = useState<RoomState>();
   const [selfId, setSelfId] = useState("");
@@ -119,7 +129,41 @@ function App() {
           );
       };
     };
-    connect();
+    const initialize = async () => {
+      try {
+        const response = await fetch(`${HOST_HTTP_ORIGIN}/api/host`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const info = (await response.json()) as HostInfoDto;
+        const expectedFingerprint = new URLSearchParams(location.search).get(
+          "fingerprint",
+        );
+        if (expectedFingerprint && expectedFingerprint !== info.fingerprint) {
+          setError(
+            `节点指纹不匹配：邀请为 ${expectedFingerprint}，实际为 ${info.fingerprint}`,
+          );
+          return;
+        }
+        if (!disposed) {
+          setHostInfo(info);
+          const adminResponse = await fetch(
+            `${HOST_HTTP_ORIGIN}/api/admin/token`,
+          );
+          if (adminResponse.ok) {
+            const admin = (await adminResponse.json()) as {
+              adminToken: string;
+            };
+            setAdminToken(admin.adminToken);
+          }
+          connect();
+        }
+      } catch (hostError) {
+        if (!disposed)
+          setError(
+            `无法读取本地主机：${hostError instanceof Error ? hostError.message : "未知错误"}`,
+          );
+      }
+    };
+    void initialize();
     return () => {
       disposed = true;
       clearTimeout(timer);
@@ -129,6 +173,23 @@ function App() {
   const login = () => {
     localStorage.setItem("playerName", name);
     send({ type: "session.login", requestId: id(), payload: { name } });
+  };
+  const discoverLan = async () => {
+    setDiscoveringLan(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${HOST_HTTP_ORIGIN}/api/lan/nodes?timeout=1200`,
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setLanNodes((await response.json()) as LanNodeDto[]);
+    } catch (discoveryError) {
+      setError(
+        `局域网扫描失败：${discoveryError instanceof Error ? discoveryError.message : "未知错误"}`,
+      );
+    } finally {
+      setDiscoveringLan(false);
+    }
   };
   const me = room?.players.find((player) => player.id === selfId);
   const createRoom = () => {
@@ -151,12 +212,40 @@ function App() {
   const act = (
     payload: Extract<ClientMessage, { type: "game.action" }>["payload"],
   ) => send({ type: "game.action", requestId: id(), payload });
+  const uploadImage = async (file: File, kind: AssetKind) => {
+    if (!adminToken)
+      throw new Error("只有运行这台主机的本地用户可以安装创作资源");
+    const response = await fetch(`${HOST_HTTP_ORIGIN}/api/assets/images`, {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type,
+        "X-Admin-Token": adminToken,
+        "X-File-Name": encodeURIComponent(file.name),
+        "X-Asset-Kind": kind,
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      throw new Error(
+        result.error ?? `图片上传失败（HTTP ${response.status}）`,
+      );
+    }
+    return (await response.json()) as AssetRecordDto;
+  };
   return (
     <main>
       <header>
         <div>
           <h1>无名杀自定义联机平台</h1>
           <p>服务端权威身份局 · 可复现回放 · 自定义武将 DSL</p>
+          {hostInfo && (
+            <small>
+              当前节点：{hostInfo.nodeName} · 指纹 {hostInfo.fingerprint}
+            </small>
+          )}
         </div>
         <span className={connected ? "online" : "offline"}>
           {connected ? "已连接" : "重连中"}
@@ -187,12 +276,17 @@ function App() {
         <ExtensionEditor
           packages={packages}
           publish={(payload) =>
-            send({ type: "package.publish", requestId: id(), payload })
+            send({
+              type: "package.publish",
+              requestId: id(),
+              payload: { package: payload, adminToken },
+            })
           }
           runTests={(payload) =>
             send({ type: "package.test", requestId: id(), payload })
           }
           testResult={packageTestResult}
+          uploadImage={uploadImage}
         />
       )}
       {tab === "replays" && (
@@ -262,6 +356,7 @@ function App() {
                 game={replayView.view}
                 selfId=""
                 act={() => undefined}
+                packages={packages}
               />
             </div>
           )}
@@ -369,6 +464,61 @@ function App() {
               ))}
               {!rooms.length && <p className="muted">暂无房间。</p>}
             </div>
+            <div className="panel grow">
+              <div className="roomHeader">
+                <div>
+                  <h2>局域网节点</h2>
+                  <p className="muted">
+                    扫描同一网络中明确开启 LAN 模式的个人主机。
+                  </p>
+                </div>
+                <button disabled={discoveringLan} onClick={discoverLan}>
+                  {discoveringLan ? "扫描中…" : "扫描节点"}
+                </button>
+              </div>
+              <div className="actions">
+                <input
+                  value={manualNodeAddress}
+                  placeholder="192.168.1.20:3001"
+                  onChange={(event) => setManualNodeAddress(event.target.value)}
+                />
+                <button
+                  className="secondary"
+                  disabled={!manualNodeAddress.trim()}
+                  onClick={() => {
+                    const value = manualNodeAddress.trim();
+                    location.assign(
+                      /^https?:\/\//i.test(value) ? value : `http://${value}`,
+                    );
+                  }}
+                >
+                  手动连接
+                </button>
+              </div>
+              {lanNodes.map((node) => (
+                <article className="room" key={node.nodeId}>
+                  <div>
+                    <strong>{node.name}</strong>
+                    <small>
+                      {node.urls[0] ?? node.host} · 指纹 {node.fingerprint}
+                    </small>
+                  </div>
+                  <button
+                    disabled={!node.urls.length}
+                    onClick={() => {
+                      const target = new URL(node.urls[0]);
+                      target.searchParams.set("fingerprint", node.fingerprint);
+                      location.assign(target);
+                    }}
+                  >
+                    打开节点
+                  </button>
+                </article>
+              ))}
+              {!discoveringLan && !lanNodes.length && (
+                <p className="muted">尚未发现其他节点，也可以手动输入地址。</p>
+              )}
+            </div>
           </section>
         ) : (
           <section className="panel">
@@ -460,7 +610,14 @@ function App() {
                 </div>
               </>
             ) : (
-              game && <GameTable game={game} selfId={selfId} act={act} />
+              game && (
+                <GameTable
+                  game={game}
+                  selfId={selfId}
+                  act={act}
+                  packages={packages}
+                />
+              )
             )}
           </section>
         ))}
@@ -472,9 +629,11 @@ function GameTable({
   game,
   selfId,
   act,
+  packages,
 }: {
   game: GameView;
   selfId: string;
+  packages: PublishedPackage[];
   act: (
     payload: Extract<ClientMessage, { type: "game.action" }>["payload"],
   ) => void;
@@ -488,6 +647,18 @@ function GameTable({
   const [guanxingTop, setGuanxingTop] = useState<string[]>([]);
   const [guanxingBottom, setGuanxingBottom] = useState<string[]>([]);
   const me = game.players.find((player) => player.id === selfId);
+  const portraitUrl = (generalId: string) => {
+    for (const item of packages) {
+      const general = item.content.generals.find(
+        (candidate) => candidate.id === generalId,
+      );
+      const asset = item.content.assets?.find(
+        (candidate) => candidate.id === general?.portraitAssetId,
+      );
+      if (asset) return `/api/assets/${asset.thumbnailHash ?? asset.hash}`;
+    }
+    return undefined;
+  };
   const selected = me?.hand?.find((card) => card.id === selectedCard);
   const myTurn = game.currentPlayerId === selfId && game.phase === "play";
   const choosingTuxi = game.pending?.kind === "tuxi";
@@ -605,6 +776,13 @@ function GameTable({
             className={`player ${game.currentPlayerId === player.id ? "current" : ""} ${!player.alive ? "dead" : ""}`}
             key={player.id}
           >
+            {portraitUrl(player.general.id) && (
+              <img
+                className="generalPortrait"
+                src={portraitUrl(player.general.id)}
+                alt={`${player.general.name}立绘`}
+              />
+            )}
             <strong>
               {player.general.name} · {player.name}
             </strong>
@@ -734,7 +912,9 @@ function GameTable({
           ) &&
           Object.values(me?.equipment ?? {}).map((card) => (
             <button
-              className={skillCards.includes(card.id) ? "card selected" : "card"}
+              className={
+                skillCards.includes(card.id) ? "card selected" : "card"
+              }
               key={`skill-equipment-${card.id}`}
               onClick={() =>
                 setSkillCards((current) =>
@@ -752,7 +932,11 @@ function GameTable({
           ))}
         {game.pending?.kind === "guanshi" &&
           Object.values(me?.equipment ?? {})
-            .filter((card) => game.pending?.kind === "guanshi" && game.pending.cardIds.includes(card.id))
+            .filter(
+              (card) =>
+                game.pending?.kind === "guanshi" &&
+                game.pending.cardIds.includes(card.id),
+            )
             .map((card) => (
               <button
                 className={
@@ -785,6 +969,13 @@ function GameTable({
                   act({ action: "chooseGeneral", generalId: general.id })
                 }
               >
+                {portraitUrl(general.id) && (
+                  <img
+                    className="choicePortrait"
+                    src={portraitUrl(general.id)}
+                    alt=""
+                  />
+                )}
                 {general.name} · {general.faction} · {general.hp}体力 ·{" "}
                 {general.skills.join(" / ")}
               </button>
@@ -889,7 +1080,10 @@ function GameTable({
                   game.pending.operation === "gain"
                     ? "获得"
                     : "弃置"}
-                  ：{cardId === "random-hand" ? "随机手牌" : visibleCard?.displayName}
+                  ：
+                  {cardId === "random-hand"
+                    ? "随机手牌"
+                    : visibleCard?.displayName}
                 </button>
               );
             })}
@@ -901,9 +1095,10 @@ function GameTable({
               onClick={() =>
                 act({
                   action: "activateSkill",
-                  skillId: game.pending?.kind === "phaseSkill"
-                    ? game.pending.skillId
-                    : "",
+                  skillId:
+                    game.pending?.kind === "phaseSkill"
+                      ? game.pending.skillId
+                      : "",
                 })
               }
             >
@@ -925,9 +1120,7 @@ function GameTable({
                 {(me?.hand ?? []).map((card) => (
                   <button
                     key={`guicai-${card.id}`}
-                    onClick={() =>
-                      act({ action: "respond", cardId: card.id })
-                    }
+                    onClick={() => act({ action: "respond", cardId: card.id })}
                   >
                     鬼才改判为{card.displayName}（{card.suit} {card.rank}）
                   </button>
@@ -1071,7 +1264,9 @@ function GameTable({
                   })
                 : [];
             })}
-            <button onClick={() => act({ action: "respond" })}>不发动流离</button>
+            <button onClick={() => act({ action: "respond" })}>
+              不发动流离
+            </button>
           </div>
         )}
         {game.pending?.kind === "guanxing" && (
@@ -1083,13 +1278,16 @@ function GameTable({
             <div className="hand">
               {game.pending.cards.map((card) => {
                 const assigned =
-                  guanxingTop.includes(card.id) || guanxingBottom.includes(card.id);
+                  guanxingTop.includes(card.id) ||
+                  guanxingBottom.includes(card.id);
                 return (
                   <div key={card.id} className="card">
                     {card.displayName} {card.suit} {card.rank}
                     <button
                       disabled={assigned}
-                      onClick={() => setGuanxingTop((items) => [...items, card.id])}
+                      onClick={() =>
+                        setGuanxingTop((items) => [...items, card.id])
+                      }
                     >
                       置于牌堆顶
                     </button>
@@ -1238,9 +1436,7 @@ function GameTable({
             .map((card) => (
               <button
                 key={`response-equipment-${card.id}`}
-                onClick={() =>
-                  act({ action: "respond", cardId: card.id })
-                }
+                onClick={() => act({ action: "respond", cardId: card.id })}
               >
                 以装备{card.displayName}响应为
                 {responseCard === "sha" ? "杀" : "桃"}
@@ -1267,25 +1463,25 @@ function GameTable({
                   ? "不弃牌，受到刚烈伤害"
                   : game.pending?.kind === "hanbing"
                     ? "不发动寒冰剑，照常造成伤害"
-                  : game.pending?.kind === "fankui"
-                    ? "不发动反馈"
-                    : game.pending?.kind === "qilin"
-                      ? "不发动麒麟弓"
-                      : game.pending?.kind === "cixiong"
-                        ? selected
-                          ? "弃置所选手牌"
-                          : "不弃牌，令来源摸牌"
-                        : selected?.name === responseCard
-                          ? responseCard === "shan"
-                            ? "打出闪"
-                            : responseCard === "sha"
-                              ? "打出杀"
-                              : responseCard === "wuxie"
-                                ? "使用无懈可击"
-                                : "使用桃救援"
-                          : responseCard === "tao"
-                            ? "放弃救援"
-                            : "放弃响应"}
+                    : game.pending?.kind === "fankui"
+                      ? "不发动反馈"
+                      : game.pending?.kind === "qilin"
+                        ? "不发动麒麟弓"
+                        : game.pending?.kind === "cixiong"
+                          ? selected
+                            ? "弃置所选手牌"
+                            : "不弃牌，令来源摸牌"
+                          : selected?.name === responseCard
+                            ? responseCard === "shan"
+                              ? "打出闪"
+                              : responseCard === "sha"
+                                ? "打出杀"
+                                : responseCard === "wuxie"
+                                  ? "使用无懈可击"
+                                  : "使用桃救援"
+                            : responseCard === "tao"
+                              ? "放弃救援"
+                              : "放弃响应"}
             </button>
           </>
         )}
