@@ -7,6 +7,7 @@ import {
 } from "@sgs/headless-engine";
 
 export * from "./compat-realm.js";
+export * from "./interaction-host.js";
 
 export interface GameCommand {
   playerId: string;
