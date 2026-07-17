@@ -48,6 +48,7 @@ test("v1 and v2 reference plugins compile", async () => {
       "multi-step-active",
       "judgment-response",
       "conditional-state",
+      "advanced-runtime",
     ]) {
       const result = spawnSync(
         process.execPath,
@@ -63,6 +64,40 @@ test("v1 and v2 reference plugins compile", async () => {
       );
       assert.equal(result.status, 0, `${name}: ${result.stderr}`);
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("advanced TypeScript hook is isolated, tested and emitted as runtime source", async () => {
+  const repository = resolve("../..");
+  const runner = resolve("src/runner.ts");
+  const root = await mkdtemp(resolve(repository, ".tmp-plugin-advanced-"));
+  try {
+    const entry = join(root, "advanced.ts");
+    const output = join(root, "advanced.sgs.json");
+    await writeFile(
+      entry,
+      `import { definePackage, definePlugin, defineRuntime } from "@sgs/script-sdk";
+const runtime = defineRuntime<{ calls: number }>((input) => ({ state: { calls: (input.state?.calls ?? 0) + 1 }, effects: [{ type: "addMark", target: "self", mark: "advanced_calls", count: 1 }] }), { permissions: ["game-state"] });
+export default definePlugin({ engineApi: "rules-ir/v2", capabilities: ["rules", "advanced-runtime"], content: definePackage({ id: "test.advanced_plugin", name: "高级插件", version: "1.0.0", generals: [], skills: [], cards: [], decks: [], modes: [], tests: [], runtime }) });`,
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-vm-modules",
+        "--import",
+        import.meta.resolve("tsx"),
+        runner,
+        entry,
+        output,
+      ],
+      { cwd: repository, encoding: "utf8", timeout: 20_000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const compiled = JSON.parse(await readFile(output, "utf8"));
+    assert.equal(compiled.content.runtime.apiVersion, "noname-compat/v1");
+    assert.match(compiled.content.runtime.source, /advanced_calls/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

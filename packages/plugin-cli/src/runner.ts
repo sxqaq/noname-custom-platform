@@ -4,8 +4,9 @@ import vm from "node:vm";
 import ts from "typescript";
 import * as sdk from "@sgs/script-sdk";
 import { compilePlugin, type PluginDefinition } from "@sgs/script-sdk";
-import { validatePackage } from "@sgs/content-schema";
+import { validatePackage, type ExtensionPackageDto } from "@sgs/content-schema";
 import { HeadlessGame } from "@sgs/headless-engine";
+import { evaluateIsolatedMod } from "@sgs/noname-adapter";
 
 const [entry, output] = process.argv.slice(2);
 if (!entry || !output)
@@ -17,6 +18,7 @@ const compiled = compilePlugin(definition);
 const validation = validatePackage(compiled.content);
 if (!validation.ok) throw new Error(validation.errors.join("\n"));
 compiled.content = validation.value;
+if (compiled.content.runtime) await testAdvancedRuntime(compiled.content);
 for (const item of compiled.content.tests.length
   ? compiled.content.tests
   : [
@@ -140,4 +142,29 @@ async function loadSandboxedPlugin(path: string) {
   await authorModule.evaluate({ timeout: 2_000 });
   return (authorModule.namespace as Record<string, unknown>).default as
     PluginDefinition | undefined;
+}
+
+async function testAdvancedRuntime(content: ExtensionPackageDto) {
+  const runtime = content.runtime!;
+  const input = {
+    apiVersion: runtime.apiVersion,
+    hook: "roomStart",
+    hookIndex: 0,
+    packageId: content.id,
+    state: undefined,
+    game: { status: "playing", sequence: 0, turn: 1, phase: "selectGeneral" },
+  };
+  const options = {
+    source: runtime.source,
+    input,
+    seed: "plugin-build-determinism",
+    timeoutMs: runtime.limits.timeoutMs,
+    memoryMb: runtime.limits.memoryMb,
+  };
+  const first = await evaluateIsolatedMod(options);
+  const second = await evaluateIsolatedMod(options);
+  if (JSON.stringify(first) !== JSON.stringify(second))
+    throw new Error(
+      "Advanced runtime is not deterministic for identical input and seed",
+    );
 }

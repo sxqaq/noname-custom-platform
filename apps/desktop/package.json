@@ -37,6 +37,21 @@
       {
         "from": "../web/dist",
         "to": "web"
+      },
+      {
+        "from": "../../vendor/noname/apps/core/character",
+        "to": "noname/apps/core/character",
+        "filter": [
+          "**/*.js"
+        ]
+      },
+      {
+        "from": "../../vendor/noname/LICENSE",
+        "to": "noname/LICENSE"
+      },
+      {
+        "from": "../../vendor/noname/README.md",
+        "to": "noname/README.md"
       }
     ],
     "asar": true,

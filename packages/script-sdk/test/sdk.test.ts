@@ -5,6 +5,7 @@ import {
   condition,
   definePackage,
   definePlugin,
+  defineRuntime,
   defineSkill,
   effect,
   modifier,
@@ -32,6 +33,42 @@ test("SDK only produces declarative content", () => {
   assert.equal(pack.schemaVersion, 4);
   assert.deepEqual(pack.assets, []);
   assert.equal(pack.skills[0].effects[0].type, "draw");
+});
+
+test("advanced runtime hooks compile to a pinned self-contained manifest", () => {
+  const runtime = defineRuntime<{ calls: number }>(
+    (input) => ({
+      state: { calls: (input.state?.calls ?? 0) + 1 },
+      effects: [
+        { type: "addMark", target: "self", mark: "sdk_calls", count: 1 },
+      ],
+    }),
+    { permissions: ["game-state", "deterministic-random"] },
+  );
+  const plugin = compilePlugin(
+    definePlugin({
+      engineApi: "rules-ir/v2",
+      capabilities: ["rules", "advanced-runtime"],
+      content: definePackage({
+        id: "custom.advanced",
+        name: "高级运行时",
+        version: "1.0.0",
+        generals: [],
+        skills: [],
+        cards: [],
+        decks: [],
+        modes: [],
+        tests: [],
+        runtime,
+      }),
+    }),
+  );
+  assert.equal(plugin.content.runtime?.apiVersion, "noname-compat/v1");
+  assert.match(plugin.content.runtime?.source ?? "", /sdk_calls/);
+  assert.doesNotMatch(
+    JSON.stringify(plugin),
+    /"runtime"\s*:\s*\{[^}]*function/,
+  );
 });
 
 test("SDK v2 builds condition and state flow without executable functions", () => {

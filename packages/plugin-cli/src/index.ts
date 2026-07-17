@@ -31,8 +31,9 @@ if (command === "build" || command === "watch" || command === "test") {
   }
 } else if (command === "init") {
   const target = resolve(args[0] ?? "my-sgs-plugin");
+  const advanced = args.includes("--advanced");
   await mkdir(target, { recursive: true });
-  await writeFile(resolve(target, "plugin.ts"), pluginTemplate(), {
+  await writeFile(resolve(target, "plugin.ts"), pluginTemplate(advanced), {
     flag: "wx",
   });
   await writeFile(
@@ -57,7 +58,7 @@ if (command === "build" || command === "watch" || command === "test") {
   console.log(`Created plugin project in ${target}`);
 } else {
   console.log(
-    "sgs-plugin init [directory]\nsgs-plugin build [entry] --out [file]\nsgs-plugin watch [entry] --out [file]\nsgs-plugin test [entry]",
+    "sgs-plugin init [directory] [--advanced]\nsgs-plugin build [entry] --out [file]\nsgs-plugin watch [entry] --out [file]\nsgs-plugin test [entry]",
   );
   if (command && command !== "help" && command !== "--help")
     process.exitCode = 1;
@@ -78,7 +79,8 @@ function compile(entry: string, output: string) {
   return child.status ?? 1;
 }
 
-function pluginTemplate() {
+function pluginTemplate(advanced = false) {
+  if (advanced) return advancedPluginTemplate();
   return `import { defineGeneral, definePackage, definePlugin, defineSkill, effect } from "@sgs/script-sdk";
 
 const skill = defineSkill({
@@ -97,6 +99,35 @@ export default definePlugin({
     version: "1.0.0",
     generals: [defineGeneral({ id: "example.hero", name: "自定义武将", faction: "qun", hp: 4, skills: [skill.id] })],
     skills: [skill], cards: [], decks: [], modes: [], tests: [],
+  }),
+});
+`;
+}
+
+function advancedPluginTemplate() {
+  return `import { defineGeneral, definePackage, definePlugin, defineRuntime } from "@sgs/script-sdk";
+
+const runtime = defineRuntime<{ calls: number }>((input) => ({
+  state: { calls: (input.state?.calls ?? 0) + 1 },
+  effects: input.hook === "roomStart"
+    ? [{ type: "addMark", target: "self", mark: "example_started", count: 1 }]
+    : [],
+  logs: [\`handled \${input.hook}\`],
+}), {
+  permissions: ["game-state"],
+  timeoutMs: 500,
+  memoryMb: 32,
+});
+
+export default definePlugin({
+  engineApi: "rules-ir/v2",
+  capabilities: ["rules", "advanced-runtime"],
+  content: definePackage({
+    id: "example.advanced_plugin",
+    name: "我的高级代码插件",
+    version: "1.0.0",
+    generals: [defineGeneral({ id: "example.hero", name: "自定义武将", faction: "qun", hp: 4, skills: [] })],
+    skills: [], cards: [], decks: [], modes: [], tests: [], runtime,
   }),
 });
 `;
