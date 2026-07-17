@@ -1,7 +1,7 @@
 {
   "name": "noname-custom-platform",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Server-authoritative web platform for friend-room identity games and declarative custom content.",
   "license": "GPL-3.0-only",
   "repository": {
