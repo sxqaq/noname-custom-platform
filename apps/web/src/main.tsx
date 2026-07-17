@@ -235,6 +235,34 @@ function App() {
     }
     return (await response.json()) as AssetRecordDto;
   };
+  const installPack = async (file: File) => {
+    if (!adminToken)
+      throw new Error("只有运行这台主机的本地用户可以安装扩展包");
+    const response = await fetch(`${HOST_HTTP_ORIGIN}/api/packages/install`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-sgspack",
+        "X-Admin-Token": adminToken,
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const result = (await response.json()) as { error?: string };
+      throw new Error(result.error ?? "扩展包安装失败");
+    }
+  };
+  const uninstallPackage = async (packageId: string, version: string) => {
+    if (!adminToken)
+      throw new Error("只有运行这台主机的本地用户可以卸载扩展包");
+    const response = await fetch(
+      `${HOST_HTTP_ORIGIN}/api/packages/${encodeURIComponent(packageId)}/${encodeURIComponent(version)}`,
+      { method: "DELETE", headers: { "X-Admin-Token": adminToken } },
+    );
+    if (!response.ok) {
+      const result = (await response.json()) as { error?: string };
+      throw new Error(result.error ?? "扩展卸载失败");
+    }
+  };
   return (
     <main>
       <header>
@@ -287,6 +315,8 @@ function App() {
           }
           testResult={packageTestResult}
           uploadImage={uploadImage}
+          installPack={installPack}
+          uninstallPackage={uninstallPackage}
         />
       )}
       {tab === "replays" && (
@@ -648,6 +678,11 @@ function GameTable({
   const [selectedSkill, setSelectedSkill] = useState<string>();
   const [skillCards, setSkillCards] = useState<string[]>([]);
   const [skillTargets, setSkillTargets] = useState<string[]>([]);
+  const [skillOption, setSkillOption] = useState<string>();
+  const [skillNumber, setSkillNumber] = useState<number>();
+  const [skillSuit, setSkillSuit] = useState<
+    "spade" | "heart" | "club" | "diamond"
+  >();
   const [cardTargets, setCardTargets] = useState<string[]>([]);
   const [guanxingTop, setGuanxingTop] = useState<string[]>([]);
   const [guanxingBottom, setGuanxingBottom] = useState<string[]>([]);
@@ -799,6 +834,10 @@ function GameTable({
                 className="generalPortrait"
                 src={portraitUrl(player.general.id)}
                 alt={`${player.general.name}立绘`}
+                style={{
+                  objectPosition: `${player.general.cardStyle?.portraitX ?? 50}% ${player.general.cardStyle?.portraitY ?? 45}%`,
+                  transform: `scale(${player.general.cardStyle?.portraitScale ?? 1})`,
+                }}
               />
             )}
             <strong>
@@ -1001,6 +1040,9 @@ function GameTable({
                     className="choicePortrait"
                     src={portraitUrl(general.id)}
                     alt=""
+                    style={{
+                      objectPosition: `${general.cardStyle?.portraitX ?? 50}% ${general.cardStyle?.portraitY ?? 45}%`,
+                    }}
                   />
                 )}
                 {general.name} · {general.faction} · {general.hp}体力 ·{" "}
@@ -1465,14 +1507,74 @@ function GameTable({
           <div className="notice">
             <strong>{customSkillPending.skillName}</strong>
             <span>{customSkillPending.selection.prompt}</span>
+            {customSkillPending.selection.kind === "option" && (
+              <select
+                value={
+                  skillOption ?? customSkillPending.selection.options?.[0]?.id
+                }
+                onChange={(event) => setSkillOption(event.target.value)}
+              >
+                {customSkillPending.selection.options?.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {customSkillPending.selection.kind === "number" && (
+              <input
+                type="number"
+                min={customSkillPending.selection.min}
+                max={customSkillPending.selection.max}
+                value={skillNumber ?? customSkillPending.selection.min}
+                onChange={(event) => setSkillNumber(Number(event.target.value))}
+              />
+            )}
+            {customSkillPending.selection.kind === "suit" && (
+              <select
+                value={
+                  skillSuit ??
+                  customSkillPending.selection.suits?.[0] ??
+                  "spade"
+                }
+                onChange={(event) =>
+                  setSkillSuit(
+                    event.target.value as
+                      "spade" | "heart" | "club" | "diamond",
+                  )
+                }
+              >
+                {(
+                  customSkillPending.selection.suits ?? [
+                    "spade",
+                    "heart",
+                    "club",
+                    "diamond",
+                  ]
+                ).map((suit) => (
+                  <option key={suit} value={suit}>
+                    {
+                      {
+                        spade: "黑桃",
+                        heart: "红桃",
+                        club: "梅花",
+                        diamond: "方块",
+                      }[suit]
+                    }
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               disabled={
-                (customSkillPending.selection.kind === "card"
+                (customSkillPending.selection.kind === "card" ||
+                  customSkillPending.selection.kind === "target") &&
+                ((customSkillPending.selection.kind === "card"
                   ? skillCards.length
                   : skillTargets.length) < customSkillPending.selection.min ||
-                (customSkillPending.selection.kind === "card"
-                  ? skillCards.length
-                  : skillTargets.length) > customSkillPending.selection.max
+                  (customSkillPending.selection.kind === "card"
+                    ? skillCards.length
+                    : skillTargets.length) > customSkillPending.selection.max)
               }
               onClick={() => {
                 act({
@@ -1486,17 +1588,37 @@ function GameTable({
                     customSkillPending.selection.kind === "target"
                       ? skillTargets
                       : undefined,
+                  optionId:
+                    customSkillPending.selection.kind === "option"
+                      ? (skillOption ??
+                        customSkillPending.selection.options?.[0]?.id)
+                      : undefined,
+                  numberValue:
+                    customSkillPending.selection.kind === "number"
+                      ? (skillNumber ?? customSkillPending.selection.min)
+                      : undefined,
+                  suit:
+                    customSkillPending.selection.kind === "suit"
+                      ? (skillSuit ??
+                        customSkillPending.selection.suits?.[0] ??
+                        "spade")
+                      : undefined,
                 });
                 setSkillCards([]);
                 setSkillTargets([]);
+                setSkillOption(undefined);
+                setSkillNumber(undefined);
+                setSkillSuit(undefined);
               }}
             >
-              确认选择（
-              {customSkillPending.selection.kind === "card"
-                ? skillCards.length
-                : skillTargets.length}
-              /{customSkillPending.selection.min}–
-              {customSkillPending.selection.max}）
+              {customSkillPending.selection.kind === "card" ||
+              customSkillPending.selection.kind === "target"
+                ? `确认选择（${
+                    customSkillPending.selection.kind === "card"
+                      ? skillCards.length
+                      : skillTargets.length
+                  }/${customSkillPending.selection.min}–${customSkillPending.selection.max}）`
+                : "确认选择"}
             </button>
           </div>
         )}

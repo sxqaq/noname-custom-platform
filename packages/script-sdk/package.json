@@ -1,1 +1,18 @@
-{"name":"@sgs/script-sdk","version":"0.1.0","type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit","test":"tsx --test test/*.test.ts"},"dependencies":{"@sgs/protocol":"*"},"devDependencies":{"tsx":"^4.19.4"}}
+{
+  "name": "@sgs/script-sdk",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@sgs/protocol": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4"
+  }
+}

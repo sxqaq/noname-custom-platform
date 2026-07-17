@@ -5,8 +5,12 @@ import type {
   ExtensionPackageDto,
   GeneralDto,
   ModeDefinitionDto,
+  RuleConditionDto,
+  RuleSubjectDto,
+  RuleValueDto,
   SkillSelectionDto,
   SkillDto,
+  SkillModifierDto,
 } from "@sgs/protocol";
 
 /** 高级作者 SDK：构建可验证 DSL，不在服务器执行作者 JavaScript。 */
@@ -46,7 +50,132 @@ export const effect = {
     success,
     failure,
   }),
+  when: (
+    condition: RuleConditionDto,
+    thenEffects: EffectDto[],
+    elseEffects: EffectDto[] = [],
+  ): EffectDto => ({
+    type: "if",
+    target: "self",
+    condition,
+    then: thenEffects,
+    else: elseEffects,
+  }),
+  repeat: (times: number, body: EffectDto[]): EffectDto => ({
+    type: "repeat",
+    target: "self",
+    times,
+    body,
+  }),
+  setState: (stateKey: string, stateValue: number): EffectDto => ({
+    type: "setState",
+    target: "self",
+    stateKey,
+    value: stateValue,
+  }),
+  changeState: (stateKey: string, amount: number): EffectDto => ({
+    type: "changeState",
+    target: "self",
+    stateKey,
+    value: amount,
+  }),
+  loseHp: (amount = 1, target: EffectDto["target"] = "self"): EffectDto => ({
+    type: "loseHp",
+    amount,
+    target,
+  }),
+  changeMaxHp: (
+    amount: number,
+    target: EffectDto["target"] = "self",
+  ): EffectDto => ({ type: "changeMaxHp", value: amount, target }),
+  grantSkill: (
+    skillId: string,
+    duration: "turn" | "game" = "turn",
+    target: EffectDto["target"] = "self",
+  ): EffectDto => ({ type: "grantSkill", skillId, duration, target }),
+  removeSkill: (
+    skillId: string,
+    target: EffectDto["target"] = "self",
+  ): EffectDto => ({ type: "removeSkill", skillId, target }),
+  skipPhase: (
+    phase: NonNullable<EffectDto["phase"]>,
+    target: EffectDto["target"] = "self",
+  ): EffectDto => ({ type: "skipPhase", phase, target }),
+  moveCards: (
+    options: {
+      count?: number;
+      from?: EffectDto["target"];
+      fromZone?: NonNullable<EffectDto["fromZone"]>;
+      to?: NonNullable<EffectDto["to"]>;
+      toZone?: NonNullable<EffectDto["toZone"]>;
+    } = {},
+  ): EffectDto => ({
+    type: "moveCards",
+    target: options.from ?? "selected",
+    count: options.count ?? 1,
+    fromZone: options.fromZone ?? "own",
+    to: options.to ?? "self",
+    toZone: options.toZone ?? "hand",
+  }),
 };
+export const ruleValue = {
+  number: (value: number): RuleValueDto => ({ kind: "number", value }),
+  property: (
+    property: Extract<RuleValueDto, { kind: "property" }>["property"],
+    subject: RuleSubjectDto = "self",
+    key?: string,
+  ): RuleValueDto => ({ kind: "property", property, subject, key }),
+  state: (key: string, subject: RuleSubjectDto = "self"): RuleValueDto => ({
+    kind: "property",
+    property: "state",
+    subject,
+    key,
+  }),
+  selection: (key: string, subject: RuleSubjectDto = "self"): RuleValueDto => ({
+    kind: "property",
+    property: "selection",
+    subject,
+    key,
+  }),
+};
+export const condition = {
+  compare: (
+    left: RuleValueDto,
+    comparator: Extract<RuleConditionDto, { op: "compare" }>["comparator"],
+    right: RuleValueDto,
+  ): RuleConditionDto => ({ op: "compare", comparator, left, right }),
+  and: (...conditions: RuleConditionDto[]): RuleConditionDto => ({
+    op: "and",
+    conditions,
+  }),
+  or: (...conditions: RuleConditionDto[]): RuleConditionDto => ({
+    op: "or",
+    conditions,
+  }),
+  not: (value: RuleConditionDto): RuleConditionDto => ({
+    op: "not",
+    condition: value,
+  }),
+  wounded: (subject: RuleSubjectDto = "self"): RuleConditionDto => ({
+    op: "predicate",
+    predicate: "wounded",
+    subject,
+  }),
+  hasSkill: (
+    skillId: string,
+    subject: RuleSubjectDto = "self",
+  ): RuleConditionDto => ({
+    op: "predicate",
+    predicate: "hasSkill",
+    subject,
+    skillId,
+  }),
+};
+export const modifier = (
+  type: SkillModifierDto["type"],
+  amount: number,
+  when?: RuleConditionDto,
+): SkillModifierDto => ({ type, amount, when });
 export const defineSkill = (value: SkillDto) => value;
 export const selection = {
   target: (
@@ -83,6 +212,41 @@ export const selection = {
     cardZone: options.zone ?? "hand",
     consume: options.consume ?? "none",
   }),
+  option: (
+    id: string,
+    prompt: string,
+    options: Array<{ id: string; label: string; value?: number }>,
+  ): SkillSelectionDto => ({
+    id,
+    prompt,
+    kind: "option",
+    min: 1,
+    max: 1,
+    options,
+  }),
+  number: (
+    id: string,
+    prompt: string,
+    min: number,
+    max: number,
+  ): SkillSelectionDto => ({ id, prompt, kind: "number", min, max }),
+  suit: (
+    id: string,
+    prompt: string,
+    suits: Array<"spade" | "heart" | "club" | "diamond"> = [
+      "spade",
+      "heart",
+      "club",
+      "diamond",
+    ],
+  ): SkillSelectionDto => ({
+    id,
+    prompt,
+    kind: "suit",
+    min: 1,
+    max: 1,
+    suits,
+  }),
 };
 export const defineGeneral = (value: GeneralDto) => value;
 export const defineCard = (value: CardDefinitionDto) => value;
@@ -91,12 +255,12 @@ export const defineMode = (value: ModeDefinitionDto) => value;
 export function definePackage(
   value: Omit<ExtensionPackageDto, "schemaVersion">,
 ): ExtensionPackageDto {
-  return { schemaVersion: 3, assets: [], ...value };
+  return { schemaVersion: 4, assets: [], ...value };
 }
 
 export interface PluginDefinition {
   apiVersion: "sgs.plugin/v1";
-  engineApi: "rules-ir/v1";
+  engineApi: "rules-ir/v1" | "rules-ir/v2";
   capabilities: Array<"rules" | "assets">;
   content: ExtensionPackageDto;
 }
@@ -104,7 +268,7 @@ export interface PluginDefinition {
 export interface CompiledPlugin {
   format: "sgs-compiled-plugin";
   formatVersion: 1;
-  engineApi: "rules-ir/v1";
+  engineApi: "rules-ir/v1" | "rules-ir/v2";
   capabilities: Array<"rules" | "assets">;
   content: ExtensionPackageDto;
 }
@@ -119,7 +283,7 @@ export function definePlugin(
 export function compilePlugin(value: PluginDefinition): CompiledPlugin {
   if (value.apiVersion !== "sgs.plugin/v1")
     throw new Error(`Unsupported plugin API: ${String(value.apiVersion)}`);
-  if (value.engineApi !== "rules-ir/v1")
+  if (value.engineApi !== "rules-ir/v1" && value.engineApi !== "rules-ir/v2")
     throw new Error(`Unsupported rules API: ${String(value.engineApi)}`);
   const capabilities = [...new Set(value.capabilities)];
   if (capabilities.some((item) => item !== "rules" && item !== "assets"))

@@ -37,9 +37,22 @@ SIM_GAMES=1000 npm run test:simulation
 
 - 客户端不能成为对局权威来源。
 - 随机行为必须经过种子随机源，不能直接使用 `Math.random()`。
-- 扩展作者代码不能在服务器上直接执行；扩展能力应落入可校验 DSL。
+- 扩展作者代码不能在服务器或远程浏览器直接执行；扩展能力应落入可校验规则 IR。
 - 新的交互步骤必须支持快照恢复、AI/托管和回放。
 - 不提交密钥、令牌、个人数据、官方商业素材、`node_modules` 或构建产物。
+
+## 扩展能力贡献
+
+增加新的插件效果、条件或选择类型时，必须同时更新：
+
+1. `packages/protocol` 的共享类型；
+2. `packages/content-schema` 的输入校验和配额；
+3. `packages/headless-engine` 的服务端权威执行；
+4. AI、快照和回放路径；
+5. `packages/script-sdk` 与网页节点编辑器；
+6. 确定性测试和 `docs/plugin-sdk.md`。
+
+不要用允许远程 JavaScript、浏览器专属状态或客户端计算结果绕过规则 IR 的表达能力限制。
 
 ## AI 辅助贡献
 

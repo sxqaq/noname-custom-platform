@@ -65,9 +65,63 @@ export interface RoomState extends RoomSummary {
 }
 
 export type EffectTarget = "self" | "source" | "selected" | "allOthers";
+export type SkillEventDto =
+  | "turnStart"
+  | "turnEnd"
+  | "playPhaseStart"
+  | "discardPhaseStart"
+  | "afterDamage"
+  | "afterUseSha";
+export type RuleSubjectDto = "self" | "source" | "selected" | "current";
+export type RuleValueDto =
+  | { kind: "number"; value: number }
+  | {
+      kind: "property";
+      subject: RuleSubjectDto;
+      property:
+        | "hp"
+        | "maxHp"
+        | "lostHp"
+        | "handCount"
+        | "mark"
+        | "state"
+        | "selection";
+      key?: string;
+    };
+export type RuleConditionDto =
+  | { op: "and" | "or"; conditions: RuleConditionDto[] }
+  | { op: "not"; condition: RuleConditionDto }
+  | {
+      op: "compare";
+      comparator: "eq" | "neq" | "lt" | "lte" | "gt" | "gte";
+      left: RuleValueDto;
+      right: RuleValueDto;
+    }
+  | {
+      op: "predicate";
+      predicate: "alive" | "wounded" | "hasSkill";
+      subject: RuleSubjectDto;
+      skillId?: string;
+    };
 export interface EffectDto {
   id?: string;
-  type: "draw" | "recover" | "damage" | "addMark" | "discard" | "judge";
+  type:
+    | "draw"
+    | "recover"
+    | "damage"
+    | "addMark"
+    | "discard"
+    | "judge"
+    | "if"
+    | "repeat"
+    | "setState"
+    | "changeState"
+    | "loseHp"
+    | "changeMaxHp"
+    | "grantSkill"
+    | "removeSkill"
+    | "skipPhase"
+    | "moveCards";
   count?: number;
   amount?: number;
   mark?: string;
@@ -76,22 +130,45 @@ export interface EffectDto {
   successSuits?: Array<"spade" | "heart" | "club" | "diamond">;
   success?: EffectDto[];
   failure?: EffectDto[];
+  condition?: RuleConditionDto;
+  then?: EffectDto[];
+  else?: EffectDto[];
+  body?: EffectDto[];
+  times?: number;
+  stateKey?: string;
+  value?: number;
+  skillId?: string;
+  duration?: "turn" | "game";
+  phase?: "judge" | "draw" | "play" | "discard" | "end";
+  fromZone?: "hand" | "own";
+  to?: RuleSubjectDto;
+  toZone?: "hand" | "discard";
 }
 export interface SkillSelectionDto {
   id: string;
   prompt: string;
-  kind: "target" | "card";
+  kind: "target" | "card" | "option" | "number" | "suit";
   min: number;
   max: number;
   targetFilter?: "self" | "other" | "any" | "wounded";
   cardZone?: "hand" | "own";
   consume?: "none" | "discard";
+  options?: Array<{ id: string; label: string; value?: number }>;
+  suits?: Array<"spade" | "heart" | "club" | "diamond">;
+}
+export interface SkillModifierDto {
+  type:
+    "handLimit" | "drawCount" | "attackRange" | "distanceFrom" | "distanceTo";
+  amount: number;
+  when?: RuleConditionDto;
 }
 export interface SkillDto {
   id: string;
   name: string;
   kind?: "trigger" | "active";
-  event?: "turnStart" | "afterDamage" | "afterUseSha";
+  event?: SkillEventDto;
+  when?: RuleConditionDto;
+  modifiers?: SkillModifierDto[];
   usage?: "unlimited" | "oncePerTurn";
   selections?: SkillSelectionDto[];
   effects: EffectDto[];
@@ -105,6 +182,17 @@ export interface GeneralDto {
   skills: string[];
   gender?: "male" | "female";
   portraitAssetId?: string;
+  title?: string;
+  cardStyle?: GeneralCardStyleDto;
+}
+export interface GeneralCardStyleDto {
+  template: "classic" | "minimal" | "ink";
+  portraitX: number;
+  portraitY: number;
+  portraitScale: number;
+  accentColor: string;
+  textColor: string;
+  showSkillText: boolean;
 }
 export interface CardDefinitionDto {
   id: string;
@@ -116,6 +204,7 @@ export interface CardDefinitionDto {
   subtype?:
     "weapon" | "armor" | "offensiveHorse" | "defensiveHorse" | "delayed";
   range?: number;
+  faceAssetId?: string;
 }
 export interface DeckDefinitionDto {
   id: string;
@@ -145,10 +234,14 @@ export interface ExtensionTestDto {
   };
 }
 export interface ExtensionPackageDto {
-  schemaVersion: 2 | 3;
+  schemaVersion: 2 | 3 | 4;
   id: string;
   name: string;
   version: string;
+  author?: string;
+  license?: string;
+  description?: string;
+  dependencies?: Array<{ id: string; version: string }>;
   generals: GeneralDto[];
   skills: SkillDto[];
   cards: CardDefinitionDto[];
@@ -380,6 +473,7 @@ export interface GameView {
         selection: SkillSelectionDto;
         selectedCardIds: string[];
         selectedTargetIds: string[];
+        selectedValues: Record<string, number>;
       }
     | { playerId: string; kind: "discard"; count: number };
   deckCount: number;
@@ -439,6 +533,9 @@ export type ClientMessage =
             skillId: string;
             cardIds?: string[];
             targetIds?: string[];
+            optionId?: string;
+            numberValue?: number;
+            suit?: "spade" | "heart" | "club" | "diamond";
           }
         | { action: "discardCards"; cardIds: string[] }
         | { action: "endTurn" };

@@ -22,6 +22,7 @@ import {
   type LanAdvertisement,
 } from "./lan-discovery.js";
 import { AssetError, AssetStore } from "./asset-store.js";
+import { createSgsPack, importSgsPack, SgsPackError } from "./sgspack.js";
 
 export interface HostRuntime {
   config: HostRuntimeOptions;
@@ -118,6 +119,25 @@ export function startHostRuntime(
       }
     },
   );
+  app.delete("/api/packages/:id/:version", (req, res) => {
+    try {
+      requireAdmin(
+        req.socket.remoteAddress,
+        req.header("x-admin-token"),
+        adminToken,
+      );
+      registry.remove(req.params.id, req.params.version);
+      broadcastPackages();
+      res.status(204).end();
+    } catch (error) {
+      const forbidden = error instanceof AdminError;
+      const known = forbidden || error instanceof PackageError;
+      res.status(forbidden ? 403 : known ? 400 : 500).json({
+        code: known && "code" in error ? error.code : "PACKAGE_REMOVE_ERROR",
+        error: error instanceof Error ? error.message : "扩展卸载失败",
+      });
+    }
+  });
   app.get("/api/assets/:hash/meta", async (req, res) => {
     try {
       res.json(await assets.readRecord(req.params.hash));
@@ -155,6 +175,50 @@ export function startHostRuntime(
         .json({ error: error instanceof Error ? error.message : "扩展不存在" });
     }
   });
+  app.get("/api/share/:shareId/download", async (req, res) => {
+    try {
+      const published = registry.byShareId(req.params.shareId);
+      const archive = await createSgsPack(published, assets);
+      res.set({
+        "Content-Type": "application/x-sgspack",
+        "Content-Disposition": `attachment; filename="${published.content.id}-${published.content.version}.sgspack"`,
+        "Content-Length": String(archive.byteLength),
+      });
+      res.send(archive);
+    } catch (error) {
+      res
+        .status(404)
+        .json({ error: error instanceof Error ? error.message : "扩展不存在" });
+    }
+  });
+  app.post(
+    "/api/packages/install",
+    express.raw({ type: "application/x-sgspack", limit: "100mb" }),
+    async (req, res) => {
+      try {
+        requireAdmin(
+          req.socket.remoteAddress,
+          req.header("x-admin-token"),
+          adminToken,
+        );
+        if (!Buffer.isBuffer(req.body)) throw new SgsPackError("扩展包为空");
+        const content = await importSgsPack(req.body, assets);
+        const published = registry.publish(content);
+        broadcastPackages();
+        res.status(201).json(published);
+      } catch (error) {
+        const forbidden = error instanceof AdminError;
+        const known =
+          forbidden ||
+          error instanceof SgsPackError ||
+          error instanceof PackageError;
+        res.status(forbidden ? 403 : known ? 400 : 500).json({
+          code: known && "code" in error ? error.code : "SGSPACK_INSTALL_ERROR",
+          error: error instanceof Error ? error.message : "扩展安装失败",
+        });
+      }
+    },
+  );
   app.get("/api/replays", (_req, res) => res.json(games.listReplays()));
   const webDist = config.webDist;
   if (existsSync(webDist)) {

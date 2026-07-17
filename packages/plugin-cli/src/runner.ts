@@ -1,6 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { pathToFileURL } from "node:url";
+import vm from "node:vm";
+import ts from "typescript";
+import * as sdk from "@sgs/script-sdk";
 import { compilePlugin, type PluginDefinition } from "@sgs/script-sdk";
 import { validatePackage } from "@sgs/content-schema";
 import { HeadlessGame } from "@sgs/headless-engine";
@@ -8,14 +10,10 @@ import { HeadlessGame } from "@sgs/headless-engine";
 const [entry, output] = process.argv.slice(2);
 if (!entry || !output)
   throw new Error("Plugin entry and output path are required");
-const module = (await import(
-  `${pathToFileURL(entry).href}?build=${Date.now()}`
-)) as {
-  default?: PluginDefinition;
-};
-if (!module.default)
+const definition = await loadSandboxedPlugin(entry);
+if (!definition)
   throw new Error("Plugin entry must export a default plugin definition");
-const compiled = compilePlugin(module.default);
+const compiled = compilePlugin(definition);
 const validation = validatePackage(compiled.content);
 if (!validation.ok) throw new Error(validation.errors.join("\n"));
 compiled.content = validation.value;
@@ -71,3 +69,75 @@ if (output !== "-") {
   console.log(
     `Validated ${compiled.content.id}@${compiled.content.version} with deterministic smoke tests`,
   );
+
+async function loadSandboxedPlugin(path: string) {
+  const source = await readFile(path, "utf8");
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TS,
+  );
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      statement.moduleSpecifier.getText(sourceFile).slice(1, -1) !==
+        "@sgs/script-sdk"
+    )
+      throw new Error("Sandbox only allows imports from @sgs/script-sdk");
+  }
+  const transpiled = ts.transpileModule(source, {
+    fileName: path,
+    reportDiagnostics: true,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      isolatedModules: true,
+    },
+  });
+  const diagnostics = transpiled.diagnostics?.filter(
+    (item) => item.category === ts.DiagnosticCategory.Error,
+  );
+  if (diagnostics?.length)
+    throw new Error(
+      diagnostics
+        .map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))
+        .join("\n"),
+    );
+  const context = vm.createContext({
+    console: Object.freeze({ log() {}, warn() {}, error() {} }),
+  });
+  vm.runInContext(
+    `Math.random = () => { throw new Error("Math.random is unavailable in deterministic plugins") };
+     globalThis.fetch = undefined;
+     globalThis.process = undefined;
+     globalThis.require = undefined;
+     globalThis.Date = class DeterministicDate { constructor() { throw new Error("Date is unavailable in deterministic plugins") } static now() { throw new Error("Date.now is unavailable in deterministic plugins") } };`,
+    context,
+    { timeout: 100 },
+  );
+  const sdkExports = Object.entries(sdk);
+  const sdkModule = new vm.SyntheticModule(
+    sdkExports.map(([name]) => name),
+    function () {
+      for (const [name, value] of sdkExports) this.setExport(name, value);
+    },
+    { context, identifier: "@sgs/script-sdk" },
+  );
+  const authorModule = new vm.SourceTextModule(transpiled.outputText, {
+    context,
+    identifier: path,
+    importModuleDynamically() {
+      throw new Error("Dynamic imports are unavailable in plugin sandbox");
+    },
+  });
+  await authorModule.link(async (specifier) => {
+    if (specifier !== "@sgs/script-sdk")
+      throw new Error(`Sandbox import denied: ${specifier}`);
+    return sdkModule;
+  });
+  await authorModule.evaluate({ timeout: 2_000 });
+  return (authorModule.namespace as Record<string, unknown>).default as
+    PluginDefinition | undefined;
+}

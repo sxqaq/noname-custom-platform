@@ -1,9 +1,63 @@
 export type Suit = "spade" | "heart" | "club" | "diamond";
 export type Identity = "lord" | "loyalist" | "rebel" | "renegade";
 export type EffectTarget = "self" | "source" | "selected" | "allOthers";
+export type SkillEvent =
+  | "turnStart"
+  | "turnEnd"
+  | "playPhaseStart"
+  | "discardPhaseStart"
+  | "afterDamage"
+  | "afterUseSha";
+export type RuleSubject = "self" | "source" | "selected" | "current";
+export type RuleValue =
+  | { kind: "number"; value: number }
+  | {
+      kind: "property";
+      subject: RuleSubject;
+      property:
+        | "hp"
+        | "maxHp"
+        | "lostHp"
+        | "handCount"
+        | "mark"
+        | "state"
+        | "selection";
+      key?: string;
+    };
+export type RuleCondition =
+  | { op: "and" | "or"; conditions: RuleCondition[] }
+  | { op: "not"; condition: RuleCondition }
+  | {
+      op: "compare";
+      comparator: "eq" | "neq" | "lt" | "lte" | "gt" | "gte";
+      left: RuleValue;
+      right: RuleValue;
+    }
+  | {
+      op: "predicate";
+      predicate: "alive" | "wounded" | "hasSkill";
+      subject: RuleSubject;
+      skillId?: string;
+    };
 export interface Effect {
   id?: string;
-  type: "draw" | "recover" | "damage" | "addMark" | "discard" | "judge";
+  type:
+    | "draw"
+    | "recover"
+    | "damage"
+    | "addMark"
+    | "discard"
+    | "judge"
+    | "if"
+    | "repeat"
+    | "setState"
+    | "changeState"
+    | "loseHp"
+    | "changeMaxHp"
+    | "grantSkill"
+    | "removeSkill"
+    | "skipPhase"
+    | "moveCards";
   count?: number;
   amount?: number;
   mark?: string;
@@ -12,16 +66,37 @@ export interface Effect {
   successSuits?: Suit[];
   success?: Effect[];
   failure?: Effect[];
+  condition?: RuleCondition;
+  then?: Effect[];
+  else?: Effect[];
+  body?: Effect[];
+  times?: number;
+  stateKey?: string;
+  value?: number;
+  skillId?: string;
+  duration?: "turn" | "game";
+  phase?: "judge" | "draw" | "play" | "discard" | "end";
+  fromZone?: "hand" | "own";
+  to?: RuleSubject;
+  toZone?: "hand" | "discard";
 }
 export interface SkillSelection {
   id: string;
   prompt: string;
-  kind: "target" | "card";
+  kind: "target" | "card" | "option" | "number" | "suit";
   min: number;
   max: number;
   targetFilter?: "self" | "other" | "any" | "wounded";
   cardZone?: "hand" | "own";
   consume?: "none" | "discard";
+  options?: Array<{ id: string; label: string; value?: number }>;
+  suits?: Suit[];
+}
+export interface SkillModifier {
+  type:
+    "handLimit" | "drawCount" | "attackRange" | "distanceFrom" | "distanceTo";
+  amount: number;
+  when?: RuleCondition;
 }
 export interface General {
   id: string;
@@ -35,7 +110,9 @@ export interface CustomSkill {
   id: string;
   name: string;
   kind?: "trigger" | "active";
-  event?: "turnStart" | "afterDamage" | "afterUseSha";
+  event?: SkillEvent;
+  when?: RuleCondition;
+  modifiers?: SkillModifier[];
   usage?: "unlimited" | "oncePerTurn";
   selections?: SkillSelection[];
   effects: Effect[];
@@ -103,6 +180,7 @@ export interface PlayerState {
   judgment: Card[];
   alive: boolean;
   marks: Record<string, number>;
+  grantedSkills: Record<string, "turn" | "game">;
 }
 export interface TrickResolution {
   card: Card;
@@ -143,6 +221,7 @@ export type JudgmentContext =
       selfId: string;
       sourceId?: string;
       selectedId?: string;
+      skillId?: string;
       successSuits: Suit[];
       success: Effect[];
       failure: Effect[];
@@ -410,6 +489,7 @@ export type PendingResponse =
       selection: SkillSelection;
       selectedCardIds: string[];
       selectedTargetIds: string[];
+      selectedValues: Record<string, number>;
     }
   | { playerId: string; kind: "discard"; count: number };
 export interface GameLog {
@@ -470,6 +550,9 @@ export type GameCommand =
       skillId: string;
       cardIds?: string[];
       targetIds?: string[];
+      optionId?: string;
+      numberValue?: number;
+      suit?: Suit;
     }
   | { type: "discardCards"; playerId: string; cardIds: string[] }
   | { type: "endTurn"; playerId: string };
@@ -1070,6 +1153,7 @@ export class HeadlessGame {
         judgment: [],
         alive: true,
         marks: {},
+        grantedSkills: {},
       };
     });
     const definitions = new Map(
@@ -1130,6 +1214,9 @@ export class HeadlessGame {
   }
   static restore(snapshot: string, packages: ContentPackage[] = []) {
     const game = new HeadlessGame(JSON.parse(snapshot) as GameState);
+    game.state.players.forEach((player) => {
+      player.grantedSkills ??= {};
+    });
     packages
       .flatMap((pack) => pack.skills)
       .forEach((skill) => game.skills.set(skill.id, skill));
@@ -1219,7 +1306,7 @@ export class HeadlessGame {
           player.identity === "lord"
             ? player.identity
             : "hidden",
-        general: player.general,
+        general: { ...player.general, skills: this.skillIds(player) },
         hp: player.hp,
         maxHp: player.maxHp,
         alive: player.alive,
@@ -2165,7 +2252,7 @@ export class HeadlessGame {
     const equipmentSkill =
       command.skillId === "zhangba" &&
       player.equipment.weapon?.name === "zhangba";
-    if (!player.general.skills.includes(command.skillId) && !equipmentSkill)
+    if (!this.hasSkill(player, command.skillId) && !equipmentSkill)
       throw new Error("武将没有该技能");
     const customSkill = this.skills.get(command.skillId);
     if (customSkill && (customSkill.kind ?? "trigger") === "active") {
@@ -3316,8 +3403,19 @@ export class HeadlessGame {
   }
   private beginDiscard(player: PlayerState) {
     this.state.phase = "discard";
+    if (this.consumeSkippedPhase(player, "discard")) {
+      this.log("phase.discard.skipped", `${player.name}跳过弃牌阶段`);
+      this.finishTurn(player);
+      return;
+    }
     this.log("phase.discard", `${player.name}进入弃牌阶段`);
-    const excess = Math.max(0, player.hand.length - Math.max(0, player.hp));
+    this.trigger("discardPhaseStart", player);
+    if (this.state.pending || this.state.status !== "playing") return;
+    const handLimit = Math.max(
+      0,
+      player.hp + this.modifierTotal(player, "handLimit"),
+    );
+    const excess = Math.max(0, player.hand.length - handLimit);
     if (excess) {
       this.state.pending = {
         playerId: player.id,
@@ -3377,7 +3475,14 @@ export class HeadlessGame {
   }
   private finishTurn(player: PlayerState) {
     this.state.phase = "end";
+    if (this.consumeSkippedPhase(player, "end")) {
+      this.log("phase.end.skipped", `${player.name}跳过结束阶段`);
+      this.advanceTurn(player);
+      return;
+    }
     this.log("phase.end", `${player.name}的结束阶段`);
+    this.trigger("turnEnd", player);
+    if (this.state.pending || this.state.status !== "playing") return;
     if (player.general.skills.includes("biyue")) {
       this.state.pending = {
         playerId: player.id,
@@ -3399,6 +3504,8 @@ export class HeadlessGame {
     this.beginTurn(next);
   }
   private beginTurn(player: PlayerState) {
+    for (const [id, duration] of Object.entries(player.grantedSkills))
+      if (duration === "turn") delete player.grantedSkills[id];
     for (const mark of Object.keys(player.marks))
       if (mark.startsWith("used.") || mark === "rende")
         delete player.marks[mark];
@@ -3437,10 +3544,23 @@ export class HeadlessGame {
     }
     if (this.state.pending || this.state.status !== "playing") return;
     this.state.phase = "judge";
+    if (this.consumeSkippedPhase(player, "judge")) {
+      this.log("phase.judge.skipped", `${player.name}跳过判定阶段`);
+      this.beginDrawPhase(player);
+      return;
+    }
     this.log("phase.judge", `${player.name}的判定阶段`);
     this.resolveJudgment(player);
     if (this.state.pending || this.state.status !== "playing") return;
+    this.beginDrawPhase(player);
+  }
+  private beginDrawPhase(player: PlayerState) {
     this.state.phase = "draw";
+    if (this.consumeSkippedPhase(player, "draw")) {
+      this.log("phase.draw.skipped", `${player.name}跳过摸牌阶段`);
+      this.completeDrawPhase(player, 0, false);
+      return;
+    }
     this.log("phase.draw", `${player.name}的摸牌阶段`);
     if (player.general.skills.includes("tuxi")) {
       this.state.pending = { playerId: player.id, kind: "tuxi", maxTargets: 2 };
@@ -3468,29 +3588,7 @@ export class HeadlessGame {
     this.state.phase = "judge";
     this.resolveJudgment(player);
     if (this.state.pending || this.state.status !== "playing") return;
-    this.state.phase = "draw";
-    this.log("phase.draw", `${player.name}的摸牌阶段`);
-    if (player.general.skills.includes("tuxi")) {
-      this.state.pending = { playerId: player.id, kind: "tuxi", maxTargets: 2 };
-      this.log("skill.tuxi.wait", `${player.name}可以发动突袭选择至多两名角色`);
-      return;
-    }
-    const drawSkills = (["luoyi", "yingzi"] as const).filter((skill) =>
-      player.general.skills.includes(skill),
-    );
-    if (drawSkills.length) {
-      this.state.pending = {
-        playerId: player.id,
-        kind: "phaseSkill",
-        skillId: drawSkills[0],
-        continuation: "draw",
-        remainingSkills: drawSkills.slice(1),
-        drawCount: this.state.mode.drawPerTurn,
-      };
-      this.log("skill.phase.wait", `${player.name}可以发动${drawSkills[0]}`);
-      return;
-    }
-    this.completeDrawPhase(player, this.state.mode.drawPerTurn);
+    this.beginDrawPhase(player);
   }
   private resolvePhaseSkill(
     player: PlayerState,
@@ -3532,15 +3630,37 @@ export class HeadlessGame {
     if (accepted) this.draw(player, 1);
     this.advanceTurn(player);
   }
-  private completeDrawPhase(player: PlayerState, count: number) {
-    this.draw(player, count);
+  private completeDrawPhase(
+    player: PlayerState,
+    count: number,
+    applyModifier = true,
+  ) {
+    this.draw(
+      player,
+      Math.max(
+        0,
+        count + (applyModifier ? this.modifierTotal(player, "drawCount") : 0),
+      ),
+    );
     this.state.phase = "play";
     this.log("phase.play", `${player.name}的出牌阶段`);
-    if (player.marks.skipPlay) {
+    if (this.consumeSkippedPhase(player, "play") || player.marks.skipPlay) {
       delete player.marks.skipPlay;
       this.log("phase.play.skipped", `${player.name}跳过出牌阶段`);
       this.endTurn(player.id);
+      return;
     }
+    this.trigger("playPhaseStart", player);
+    if (this.state.pending || this.state.status !== "playing") return;
+  }
+  private consumeSkippedPhase(
+    player: PlayerState,
+    phase: "judge" | "draw" | "play" | "discard" | "end",
+  ) {
+    const key = `skipPhase.${phase}`;
+    if (!player.marks[key]) return false;
+    delete player.marks[key];
+    return true;
   }
   private resolveJudgment(player: PlayerState) {
     const delayed = player.judgment.shift();
@@ -4039,7 +4159,13 @@ export class HeadlessGame {
       const branch = context.successSuits.includes(judged.suit)
         ? context.success
         : context.failure;
-      this.applyEffects([...branch, ...context.after], self, source, selected);
+      this.applyEffects(
+        [...branch, ...context.after],
+        self,
+        source,
+        selected,
+        context.skillId,
+      );
       if (!this.state.pending) this.state.phase = context.resumePhase;
       return;
     }
@@ -4347,29 +4473,61 @@ export class HeadlessGame {
     if (attacker.equipment.offensiveHorse) value--;
     if (attacker.general.skills.includes("mashu")) value--;
     if (target.equipment.defensiveHorse) value++;
+    value += this.modifierTotal(attacker, "distanceFrom");
+    value += this.modifierTotal(target, "distanceTo");
     return Math.max(1, value);
   }
   private attackRange(player: PlayerState) {
-    return player.equipment.weapon?.range ?? 1;
+    return Math.max(
+      1,
+      (player.equipment.weapon?.range ?? 1) +
+        this.modifierTotal(player, "attackRange"),
+    );
+  }
+  private modifierTotal(player: PlayerState, type: SkillModifier["type"]) {
+    return this.skillIds(player).reduce((total, id) => {
+      const skill = this.skills.get(id);
+      if (!skill) return total;
+      return (
+        total +
+        (skill.modifiers ?? [])
+          .filter(
+            (modifier) =>
+              modifier.type === type &&
+              (!modifier.when ||
+                this.evaluateCondition(
+                  modifier.when,
+                  player,
+                  undefined,
+                  player,
+                  skill.id,
+                )),
+          )
+          .reduce((sum, modifier) => sum + modifier.amount, 0)
+      );
+    }, 0);
   }
   private trigger(
     event: CustomSkill["event"],
     self: PlayerState,
     source?: PlayerState,
   ) {
-    for (const id of self.general.skills) {
+    for (const id of this.skillIds(self)) {
       const skill = this.skills.get(id);
       if (
         !skill ||
         (skill.kind ?? "trigger") !== "trigger" ||
-        skill.event !== event
+        skill.event !== event ||
+        (skill.when &&
+          !this.evaluateCondition(skill.when, self, source, self, skill.id))
       )
         continue;
       this.applyEffects(
-        skill.graph?.nodes ?? skill.effects,
+        this.resolveSkillEffects(skill),
         self,
         source,
         self,
+        skill.id,
       );
       this.log("skill.trigger", `${self.name}发动了${skill.name}`);
     }
@@ -4379,10 +4537,60 @@ export class HeadlessGame {
     self: PlayerState,
     source?: PlayerState,
     selected?: PlayerState,
+    skillId?: string,
   ) {
-    if (effects.length > 64) throw new Error("效果节点过多");
+    if (effects.length > 256) throw new Error("效果节点过多");
     for (let effectIndex = 0; effectIndex < effects.length; effectIndex++) {
       const effect = effects[effectIndex];
+      if (effect.id)
+        this.log(
+          "skill.node",
+          `${skillId ?? "anonymous"} 执行节点 ${effect.id}`,
+        );
+      if (effect.type === "if") {
+        const branch = effect.condition
+          ? this.evaluateCondition(
+              effect.condition,
+              self,
+              source,
+              selected,
+              skillId,
+            )
+            ? (effect.then ?? [])
+            : (effect.else ?? [])
+          : [];
+        this.applyEffects(
+          [...branch, ...effects.slice(effectIndex + 1)],
+          self,
+          source,
+          selected,
+          skillId,
+        );
+        return;
+      }
+      if (effect.type === "repeat") {
+        const times = Math.max(0, Math.min(20, effect.times ?? 0));
+        const body = effect.body ?? [];
+        this.applyEffects(
+          [
+            ...Array.from({ length: times }, () => body).flat(),
+            ...effects.slice(effectIndex + 1),
+          ],
+          self,
+          source,
+          selected,
+          skillId,
+        );
+        return;
+      }
+      if (effect.type === "setState" || effect.type === "changeState") {
+        const key = this.skillStateKey(skillId, effect.stateKey);
+        self.marks[key] =
+          effect.type === "setState"
+            ? (effect.value ?? 0)
+            : (self.marks[key] ?? 0) + (effect.value ?? 0);
+        continue;
+      }
       const targets =
         effect.target === "allOthers"
           ? this.state.players.filter(
@@ -4403,6 +4611,7 @@ export class HeadlessGame {
             selfId: self.id,
             sourceId: source?.id,
             selectedId: selected?.id,
+            skillId,
             successSuits: effect.successSuits ?? ["heart", "diamond"],
             success: effect.success ?? [],
             failure: effect.failure ?? [],
@@ -4423,23 +4632,197 @@ export class HeadlessGame {
             (target.marks[effect.mark ?? "mark"] ?? 0) + (effect.count ?? 1);
         if (effect.type === "discard")
           this.discardRandom(target, effect.count ?? 1);
+        if (effect.type === "loseHp") {
+          target.hp -= effect.amount ?? 1;
+          this.log("hp.lose", `${target.name}失去${effect.amount ?? 1}点体力`);
+          if (target.hp <= 0) {
+            this.enterDying(target, source ?? self, "play");
+            return;
+          }
+        }
+        if (effect.type === "changeMaxHp") {
+          target.maxHp = Math.max(1, target.maxHp + (effect.value ?? 0));
+          target.hp = Math.min(target.hp, target.maxHp);
+        }
+        if (effect.type === "grantSkill" && effect.skillId)
+          target.grantedSkills[effect.skillId] = effect.duration ?? "turn";
+        if (effect.type === "removeSkill" && effect.skillId)
+          delete target.grantedSkills[effect.skillId];
+        if (effect.type === "skipPhase" && effect.phase)
+          target.marks[`skipPhase.${effect.phase}`] = 1;
+        if (effect.type === "moveCards") {
+          const destination = this.ruleSubject(
+            effect.to ?? "self",
+            self,
+            source,
+            selected,
+          );
+          const count = Math.max(0, Math.min(20, effect.count ?? 1));
+          for (let i = 0; i < count; i++) {
+            const card =
+              effect.fromZone === "hand"
+                ? target.hand.length
+                  ? this.takeCard(
+                      target,
+                      target.hand[this.rng.int(target.hand.length)].id,
+                    )
+                  : undefined
+                : this.removeOneCard(target);
+            if (!card) break;
+            if (effect.toZone === "discard") this.state.discard.push(card);
+            else if (destination) destination.hand.push(card);
+            else this.state.discard.push(card);
+          }
+        }
       }
     }
+  }
+  private resolveSkillEffects(skill: CustomSkill) {
+    if (!skill.graph) return skill.effects;
+    const nodes = new Map(
+      skill.graph.nodes.map((node) => [node.id ?? "", node] as const),
+    );
+    const ordered: Effect[] = [];
+    const visited = new Set<string>();
+    let id: string | undefined = skill.graph.entry;
+    while (id) {
+      if (visited.has(id)) throw new Error(`技能图存在循环：${id}`);
+      if (visited.size >= 256) throw new Error("技能图节点过多");
+      const node = nodes.get(id);
+      if (!node) throw new Error(`技能图引用不存在的节点：${id}`);
+      visited.add(id);
+      ordered.push(node);
+      id = node.next;
+    }
+    return ordered;
+  }
+  private skillStateKey(skillId?: string, key?: string) {
+    return `state.${skillId ?? "anonymous"}.${key ?? "value"}`;
+  }
+  private selectionStateKey(skillId?: string, key?: string) {
+    return `selection.${skillId ?? "anonymous"}.${key ?? "value"}`;
+  }
+  private ruleSubject(
+    subject: RuleSubject,
+    self: PlayerState,
+    source?: PlayerState,
+    selected?: PlayerState,
+  ) {
+    if (subject === "source") return source;
+    if (subject === "selected") return selected;
+    if (subject === "current")
+      return this.player(this.state.currentPlayerId, false);
+    return self;
+  }
+  private ruleValue(
+    value: RuleValue,
+    self: PlayerState,
+    source?: PlayerState,
+    selected?: PlayerState,
+    skillId?: string,
+  ) {
+    if (value.kind === "number") return value.value;
+    const player = this.ruleSubject(value.subject, self, source, selected);
+    if (!player) return 0;
+    if (value.property === "hp") return player.hp;
+    if (value.property === "maxHp") return player.maxHp;
+    if (value.property === "lostHp") return player.maxHp - player.hp;
+    if (value.property === "handCount") return player.hand.length;
+    if (value.property === "state")
+      return player.marks[this.skillStateKey(skillId, value.key)] ?? 0;
+    if (value.property === "selection")
+      return player.marks[this.selectionStateKey(skillId, value.key)] ?? 0;
+    return player.marks[value.key ?? "mark"] ?? 0;
+  }
+  private evaluateCondition(
+    condition: RuleCondition,
+    self: PlayerState,
+    source?: PlayerState,
+    selected?: PlayerState,
+    skillId?: string,
+  ): boolean {
+    if ("conditions" in condition)
+      return condition.op === "and"
+        ? condition.conditions.every((item) =>
+            this.evaluateCondition(item, self, source, selected, skillId),
+          )
+        : condition.conditions.some((item) =>
+            this.evaluateCondition(item, self, source, selected, skillId),
+          );
+    if (condition.op === "not")
+      return !this.evaluateCondition(
+        condition.condition,
+        self,
+        source,
+        selected,
+        skillId,
+      );
+    if (condition.op === "predicate") {
+      const player = this.ruleSubject(
+        condition.subject,
+        self,
+        source,
+        selected,
+      );
+      if (!player) return false;
+      if (condition.predicate === "alive") return player.alive;
+      if (condition.predicate === "wounded") return player.hp < player.maxHp;
+      return condition.skillId
+        ? this.hasSkill(player, condition.skillId)
+        : false;
+    }
+    const left = this.ruleValue(
+      condition.left,
+      self,
+      source,
+      selected,
+      skillId,
+    );
+    const right = this.ruleValue(
+      condition.right,
+      self,
+      source,
+      selected,
+      skillId,
+    );
+    if (condition.comparator === "eq") return left === right;
+    if (condition.comparator === "neq") return left !== right;
+    if (condition.comparator === "lt") return left < right;
+    if (condition.comparator === "lte") return left <= right;
+    if (condition.comparator === "gt") return left > right;
+    return left >= right;
   }
   private startCustomActiveSkill(
     player: PlayerState,
     skill: CustomSkill,
     command: Extract<GameCommand, { type: "activateSkill" }>,
   ) {
-    if (command.cardIds?.length || command.targetIds?.length)
+    if (
+      command.cardIds?.length ||
+      command.targetIds?.length ||
+      command.optionId !== undefined ||
+      command.numberValue !== undefined ||
+      command.suit !== undefined
+    )
       throw new Error("多段主动技能必须先启动，再逐步提交选择");
+    if (
+      skill.when &&
+      !this.evaluateCondition(skill.when, player, undefined, player, skill.id)
+    )
+      throw new Error("当前不满足插件技能发动条件");
     const usage = skill.usage ?? "oncePerTurn";
     if (usage === "oncePerTurn" && player.marks[`used.${skill.id}`])
       throw new Error("本回合已经发动过该技能");
     const selections = skill.selections ?? [];
     if (!selections.length) {
       if (usage === "oncePerTurn") player.marks[`used.${skill.id}`] = 1;
-      this.applyEffects(skill.effects, player, undefined, player);
+      this.applyEffects(
+        this.resolveSkillEffects(skill),
+        player,
+        undefined,
+        player,
+        skill.id,
+      );
       this.log("skill.custom", `${player.name}发动${skill.name}`);
       return;
     }
@@ -4453,6 +4836,7 @@ export class HeadlessGame {
       selection: selections[0],
       selectedCardIds: [],
       selectedTargetIds: [],
+      selectedValues: {},
     };
     this.log("skill.custom.start", `${player.name}开始发动${skill.name}`);
   }
@@ -4471,44 +4855,67 @@ export class HeadlessGame {
     if (!skill || (skill.kind ?? "trigger") !== "active")
       throw new Error("插件主动技能定义不存在");
     const selection = pending.selection;
-    const submitted =
-      selection.kind === "target"
-        ? (command.targetIds ?? [])
-        : (command.cardIds ?? []);
-    if (
-      submitted.length < selection.min ||
-      submitted.length > selection.max ||
-      new Set(submitted).size !== submitted.length
-    )
-      throw new Error("插件技能选择数量不合法");
-    if (selection.kind === "target") {
-      for (const id of submitted) {
-        const target = this.player(id);
-        if (!target.alive) throw new Error("插件技能不能选择阵亡目标");
-        if (selection.targetFilter === "self" && target.id !== player.id)
-          throw new Error("插件技能只能选择自己");
-        if (selection.targetFilter === "other" && target.id === player.id)
-          throw new Error("插件技能必须选择其他角色");
-        if (selection.targetFilter === "wounded" && target.hp >= target.maxHp)
-          throw new Error("插件技能必须选择受伤角色");
+    if (selection.kind === "target" || selection.kind === "card") {
+      const submitted =
+        selection.kind === "target"
+          ? (command.targetIds ?? [])
+          : (command.cardIds ?? []);
+      if (
+        submitted.length < selection.min ||
+        submitted.length > selection.max ||
+        new Set(submitted).size !== submitted.length
+      )
+        throw new Error("插件技能选择数量不合法");
+      if (selection.kind === "target") {
+        for (const id of submitted) {
+          const target = this.player(id);
+          if (!target.alive) throw new Error("插件技能不能选择阵亡目标");
+          if (selection.targetFilter === "self" && target.id !== player.id)
+            throw new Error("插件技能只能选择自己");
+          if (selection.targetFilter === "other" && target.id === player.id)
+            throw new Error("插件技能必须选择其他角色");
+          if (selection.targetFilter === "wounded" && target.hp >= target.maxHp)
+            throw new Error("插件技能必须选择受伤角色");
+        }
+        pending.selectedTargetIds.push(...submitted);
+      } else {
+        const selectable = new Set([
+          ...player.hand.map((card) => card.id),
+          ...(selection.cardZone === "own"
+            ? Object.values(player.equipment)
+                .filter((card): card is Card => Boolean(card))
+                .map((card) => card.id)
+            : []),
+        ]);
+        if (submitted.some((id) => !selectable.has(id)))
+          throw new Error("插件技能选择了不允许的卡牌");
+        pending.selectedCardIds.push(...submitted);
+        if (selection.consume === "discard")
+          this.state.discard.push(
+            ...submitted.map((id) => this.takeOwnCard(player, id)),
+          );
       }
-      pending.selectedTargetIds.push(...submitted);
+    } else if (selection.kind === "option") {
+      const optionIndex = selection.options?.findIndex(
+        (item) => item.id === command.optionId,
+      );
+      if (optionIndex === undefined || optionIndex < 0)
+        throw new Error("插件技能选项不合法");
+      pending.selectedValues[selection.id] =
+        selection.options?.[optionIndex].value ?? optionIndex;
+    } else if (selection.kind === "number") {
+      if (
+        !Number.isInteger(command.numberValue) ||
+        command.numberValue! < selection.min ||
+        command.numberValue! > selection.max
+      )
+        throw new Error("插件技能数字选择不合法");
+      pending.selectedValues[selection.id] = command.numberValue!;
     } else {
-      const selectable = new Set([
-        ...player.hand.map((card) => card.id),
-        ...(selection.cardZone === "own"
-          ? Object.values(player.equipment)
-              .filter((card): card is Card => Boolean(card))
-              .map((card) => card.id)
-          : []),
-      ]);
-      if (submitted.some((id) => !selectable.has(id)))
-        throw new Error("插件技能选择了不允许的卡牌");
-      pending.selectedCardIds.push(...submitted);
-      if (selection.consume === "discard")
-        this.state.discard.push(
-          ...submitted.map((id) => this.takeOwnCard(player, id)),
-        );
+      const suits = selection.suits ?? ["spade", "heart", "club", "diamond"];
+      const suitIndex = suits.indexOf(command.suit!);
+      if (suitIndex < 0) throw new Error("插件技能花色选择不合法");
+      pending.selectedValues[selection.id] = suitIndex;
     }
     const nextIndex = pending.stepIndex + 1;
     const next = skill.selections?.[nextIndex];
@@ -4522,20 +4929,39 @@ export class HeadlessGame {
       return;
     }
     const selected = this.player(pending.selectedTargetIds[0] ?? player.id);
+    for (const [id, value] of Object.entries(pending.selectedValues))
+      player.marks[this.selectionStateKey(skill.id, id)] = value;
     const usage = skill.usage ?? "oncePerTurn";
     if (usage === "oncePerTurn") player.marks[`used.${skill.id}`] = 1;
     delete this.state.pending;
     this.state.phase = "play";
-    this.applyEffects(skill.effects, player, undefined, selected);
+    this.applyEffects(
+      this.resolveSkillEffects(skill),
+      player,
+      undefined,
+      selected,
+      skill.id,
+    );
     this.log("skill.custom", `${player.name}发动${skill.name}`);
   }
   availableCustomActiveSkill(playerId: string) {
     const player = this.player(playerId, false);
     if (!player || !player.alive) return undefined;
-    return player.general.skills
+    return this.skillIds(player)
       .map((id) => this.skills.get(id))
       .find((skill) => {
         if (!skill || (skill.kind ?? "trigger") !== "active") return false;
+        if (
+          skill.when &&
+          !this.evaluateCondition(
+            skill.when,
+            player,
+            undefined,
+            player,
+            skill.id,
+          )
+        )
+          return false;
         if ((skill.usage ?? "oncePerTurn") === "unlimited") return false;
         if (player.marks[`used.${skill.id}`]) return false;
         return (skill.selections ?? []).every((selection) => {
@@ -4547,6 +4973,12 @@ export class HeadlessGame {
                 : 0);
             return count >= selection.min;
           }
+          if (selection.kind === "option")
+            return Boolean(selection.options?.length);
+          if (selection.kind === "number")
+            return selection.min <= selection.max;
+          if (selection.kind === "suit")
+            return (selection.suits?.length ?? 4) > 0;
           return (
             this.state.players.filter((target) => {
               if (!target.alive) return false;
@@ -4607,9 +5039,17 @@ export class HeadlessGame {
   private hasSkill(player: PlayerState, skillId: string) {
     if (["hujia", "jijiang", "jiuyuan"].includes(skillId))
       return (
-        player.identity === "lord" && player.general.skills.includes(skillId)
+        player.identity === "lord" && this.skillIds(player).includes(skillId)
       );
-    return player.general.skills.includes(skillId);
+    return this.skillIds(player).includes(skillId);
+  }
+  private skillIds(player: PlayerState) {
+    return [
+      ...new Set([
+        ...player.general.skills,
+        ...Object.keys(player.grantedSkills ?? {}),
+      ]),
+    ];
   }
   private player(id: string): PlayerState;
   private player(id: string, required: false): PlayerState | undefined;
@@ -4759,6 +5199,27 @@ export function chooseAiCommand(
         cardIds: cards.slice(0, pending.selection.min).map((card) => card.id),
       };
     }
+    if (pending.selection.kind === "option")
+      return {
+        type: "activateSkill",
+        playerId: id,
+        skillId: pending.skillId,
+        optionId: pending.selection.options?.[0]?.id,
+      };
+    if (pending.selection.kind === "number")
+      return {
+        type: "activateSkill",
+        playerId: id,
+        skillId: pending.skillId,
+        numberValue: pending.selection.min,
+      };
+    if (pending.selection.kind === "suit")
+      return {
+        type: "activateSkill",
+        playerId: id,
+        skillId: pending.skillId,
+        suit: pending.selection.suits?.[0] ?? "spade",
+      };
     const targets = state.players.filter((target) => {
       if (!target.alive) return false;
       if (pending.selection.targetFilter === "self") return target.id === id;

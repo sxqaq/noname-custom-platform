@@ -31,6 +31,11 @@ export class PackageRegistry {
       }
     }
     if (!validated.ok) throw new PackageError(validated.errors.join("；"));
+    for (const dependency of validated.value.dependencies ?? [])
+      if (!this.versions.has(this.key(dependency.id, dependency.version)))
+        throw new PackageError(
+          `缺少依赖 ${dependency.id}@${dependency.version}`,
+        );
     const testResult = this.test(validated.value);
     if (testResult.failed)
       throw new PackageError(
@@ -129,6 +134,21 @@ export class PackageRegistry {
     );
     if (!found) throw new PackageError("分享扩展不存在");
     return structuredClone(found);
+  }
+  remove(id: string, version: string) {
+    const key = this.key(id, version);
+    if (!this.versions.has(key)) throw new PackageError("扩展版本不存在");
+    const dependent = [...this.versions.values()].find((item) =>
+      item.content.dependencies?.some(
+        (dependency) => dependency.id === id && dependency.version === version,
+      ),
+    );
+    if (dependent)
+      throw new PackageError(
+        `扩展仍被 ${dependent.content.id}@${dependent.content.version} 依赖`,
+      );
+    this.versions.delete(key);
+    this.save();
   }
   resolve(requested: Array<{ id: string; version: string }> = []) {
     const found = requested.map(({ id, version }) => {

@@ -18,12 +18,13 @@
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm:dev -w @sgs/game-server\" \"npm:dev -w @sgs/web\"",
-    "build": "npm run build -w @sgs/protocol -w @sgs/content-schema -w @sgs/headless-engine -w @sgs/noname-adapter -w @sgs/script-sdk -w @sgs/plugin-cli && npm run build -w @sgs/game-server -w @sgs/web",
+    "build:packages": "npm run build -w @sgs/protocol -w @sgs/content-schema -w @sgs/headless-engine -w @sgs/noname-adapter -w @sgs/script-sdk -w @sgs/plugin-cli",
+    "build": "npm run build:packages && npm run build -w @sgs/game-server -w @sgs/web",
     "build:desktop": "npm run build && npm run build -w @sgs/desktop",
     "installer:win": "npm run build:desktop && npm run dist:win -w @sgs/desktop",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run build:packages && npm run test --workspaces --if-present",
     "test:simulation": "npm run build -w @sgs/headless-engine && node scripts/simulate-games.mjs",
-    "typecheck": "npm run build -w @sgs/protocol -w @sgs/content-schema -w @sgs/headless-engine -w @sgs/noname-adapter -w @sgs/script-sdk -w @sgs/plugin-cli && npm run typecheck -w @sgs/game-server -w @sgs/web -w @sgs/desktop"
+    "typecheck": "npm run build:packages && npm run build -w @sgs/game-server && npm run typecheck -w @sgs/game-server -w @sgs/web -w @sgs/desktop"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",

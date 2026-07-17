@@ -91,6 +91,18 @@ export class AssetStore {
     return hashPattern.test(hash) && existsSync(this.blobPath(hash));
   }
 
+  async importBlob(hash: string, input: Uint8Array, record?: AssetRecordDto) {
+    this.validateHash(hash);
+    if (digest(input) !== hash) throw new AssetError("资源内容哈希不匹配");
+    if (input.byteLength > this.maxUploadBytes)
+      throw new AssetError("扩展资源超过 10 MiB");
+    await this.writeBlob(hash, input);
+    if (record) {
+      if (record.hash !== hash) throw new AssetError("资源元数据哈希不匹配");
+      await this.writeRecord(record);
+    }
+  }
+
   private async writeBlob(hash: string, data: Uint8Array) {
     const target = this.blobPath(hash);
     await mkdir(resolve(target, ".."), { recursive: true });

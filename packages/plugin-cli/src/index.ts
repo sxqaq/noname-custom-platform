@@ -68,7 +68,7 @@ function compile(entry: string, output: string) {
   const tsxImport = import.meta.resolve("tsx");
   const child = spawnSync(
     process.execPath,
-    ["--import", tsxImport, runner, entry, output],
+    ["--experimental-vm-modules", "--import", tsxImport, runner, entry, output],
     { stdio: "inherit", timeout: 15_000 },
   );
   if (child.error) {
@@ -89,7 +89,7 @@ const skill = defineSkill({
 });
 
 export default definePlugin({
-  engineApi: "rules-ir/v1",
+  engineApi: "rules-ir/v2",
   capabilities: ["rules"],
   content: definePackage({
     id: "example.my_plugin",

@@ -17,7 +17,14 @@ export default definePlugin({ engineApi: "rules-ir/v1", capabilities: ["rules"],
     const runner = resolve("src/runner.ts");
     const result = spawnSync(
       process.execPath,
-      ["--import", import.meta.resolve("tsx"), runner, entry, output],
+      [
+        "--experimental-vm-modules",
+        "--import",
+        import.meta.resolve("tsx"),
+        runner,
+        entry,
+        output,
+      ],
       { cwd: resolve("../.."), encoding: "utf8" },
     );
     assert.equal(result.status, 0, result.stderr);
@@ -31,7 +38,7 @@ export default definePlugin({ engineApi: "rules-ir/v1", capabilities: ["rules"],
   }
 });
 
-test("trigger, multi-step active and judgment reference plugins compile", async () => {
+test("v1 and v2 reference plugins compile", async () => {
   const repository = resolve("../..");
   const runner = resolve("src/runner.ts");
   const root = await mkdtemp(resolve(repository, ".tmp-plugin-examples-"));
@@ -40,10 +47,12 @@ test("trigger, multi-step active and judgment reference plugins compile", async 
       "trigger-skill",
       "multi-step-active",
       "judgment-response",
+      "conditional-state",
     ]) {
       const result = spawnSync(
         process.execPath,
         [
+          "--experimental-vm-modules",
           "--import",
           import.meta.resolve("tsx"),
           runner,
@@ -54,6 +63,56 @@ test("trigger, multi-step active and judgment reference plugins compile", async 
       );
       assert.equal(result.status, 0, `${name}: ${result.stderr}`);
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("plugin sandbox denies system imports and nondeterministic globals", async () => {
+  const repository = resolve("../..");
+  const runner = resolve("src/runner.ts");
+  const root = await mkdtemp(resolve(repository, ".tmp-plugin-sandbox-"));
+  try {
+    const output = join(root, "blocked.sgs.json");
+    const systemImport = join(root, "system-import.ts");
+    await writeFile(
+      systemImport,
+      `import fs from "node:fs"; export default fs;`,
+    );
+    const denied = spawnSync(
+      process.execPath,
+      [
+        "--experimental-vm-modules",
+        "--import",
+        import.meta.resolve("tsx"),
+        runner,
+        systemImport,
+        output,
+      ],
+      { cwd: repository, encoding: "utf8" },
+    );
+    assert.notEqual(denied.status, 0);
+    assert.match(denied.stderr, /only allows imports/);
+
+    const random = join(root, "random.ts");
+    await writeFile(
+      random,
+      `import { definePlugin } from "@sgs/script-sdk"; Math.random(); export default definePlugin({ engineApi: "rules-ir/v2", capabilities: ["rules"], content: {} as never });`,
+    );
+    const nondeterministic = spawnSync(
+      process.execPath,
+      [
+        "--experimental-vm-modules",
+        "--import",
+        import.meta.resolve("tsx"),
+        runner,
+        random,
+        output,
+      ],
+      { cwd: repository, encoding: "utf8" },
+    );
+    assert.notEqual(nondeterministic.status, 0);
+    assert.match(nondeterministic.stderr, /Math\.random is unavailable/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
