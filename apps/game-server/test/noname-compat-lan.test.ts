@@ -90,16 +90,27 @@ const pack = (): ExtensionPackageDto => ({
     kind: "noname-compat",
     apiVersion: "noname-compat/v1",
     upstreamCommit: "632d2d3c8da2893466a8c440a18861c9ed49813d",
-    permissions: ["game-state"],
+    permissions: ["game-state", "player-choice"],
     limits: { timeoutMs: 500, memoryMb: 32 },
     source: `(input) => ({
       state: { calls: (input.state?.calls ?? 0) + 1 },
       effects: [{
         type: "addMark",
         target: "self",
-        mark: input.hook === "roomStart" ? "compat_started" : "compat_actions",
+        mark: input.hook === "roomStart"
+          ? "compat_started"
+          : input.hook === "choiceResponse"
+            ? "compat_choice"
+            : "compat_actions",
         count: 1,
       }],
+      request: input.hook === "afterCommand" ? {
+        playerId: input.context.actorPlayerId,
+        selection: {
+          id: "lan_choice", prompt: "选择联机测试路线", kind: "option", min: 1, max: 1,
+          options: [{ id: "continue", label: "继续" }, { id: "pause", label: "暂停" }],
+        },
+      } : undefined,
     })`,
   },
 });
@@ -126,7 +137,7 @@ test(
       )) as { adminToken: string };
 
       host = new Peer(wsUrl);
-      await host.wait("session.welcome");
+      const hostWelcome = await host.wait("session.welcome");
       await host.wait("packages.snapshot");
       const content = pack();
       host.send("package.publish", { package: content, adminToken });
@@ -145,7 +156,7 @@ test(
       const hostRoom = await host.wait("room.snapshot");
 
       guest = new Peer(wsUrl);
-      await guest.wait("session.welcome");
+      const guestWelcome = await guest.wait("session.welcome");
       await guest.wait("packages.snapshot");
       guest.send("room.join", {
         roomId: hostRoom.payload.room.id,
@@ -204,6 +215,72 @@ test(
         hostView.players.find(
           (player) => player.id === hostView.currentPlayerId,
         )?.marks.compat_actions,
+        1,
+      );
+      assert.deepEqual(
+        hostView.players.map((player) => player.marks),
+        guestView.players.map((player) => player.marks),
+      );
+
+      const choiceView =
+        hostView.pending?.kind === "modChoice" ? hostView : guestView;
+      assert.equal(choiceView.pending?.kind, "modChoice");
+      const chooserWasHost = choiceView === hostView;
+      const chooserToken = (
+        chooserWasHost ? hostWelcome.payload : guestWelcome.payload
+      ).sessionToken as string;
+      if (chooserWasHost) {
+        host.close();
+        host = new Peer(`${wsUrl}?token=${chooserToken}`);
+        assert.equal(
+          (await host.wait("session.welcome")).payload.resumed,
+          true,
+        );
+        await host.wait("packages.snapshot");
+        await host.wait("room.snapshot");
+        hostView = (await host.wait("game.snapshot")).payload as GameView;
+      } else {
+        guest.close();
+        guest = new Peer(`${wsUrl}?token=${chooserToken}`);
+        assert.equal(
+          (await guest.wait("session.welcome")).payload.resumed,
+          true,
+        );
+        await guest.wait("packages.snapshot");
+        await guest.wait("room.snapshot");
+        guestView = (await guest.wait("game.snapshot")).payload as GameView;
+      }
+      const resumedChoice = chooserWasHost ? hostView : guestView;
+      assert.equal(resumedChoice.pending?.kind, "modChoice");
+      const requestId =
+        resumedChoice.pending?.kind === "modChoice"
+          ? resumedChoice.pending.requestId
+          : "";
+      (chooserWasHost ? host : guest).send("game.action", {
+        action: "modChoice",
+        requestId,
+        optionId: "continue",
+      });
+      [hostView, guestView] = await Promise.all([
+        host
+          .wait("game.snapshot", (message) =>
+            (message.payload as GameView).players.some(
+              (player) => player.marks.compat_choice === 1,
+            ),
+          )
+          .then((message) => message.payload as GameView),
+        guest
+          .wait("game.snapshot", (message) =>
+            (message.payload as GameView).players.some(
+              (player) => player.marks.compat_choice === 1,
+            ),
+          )
+          .then((message) => message.payload as GameView),
+      ]);
+      assert.equal(
+        hostView.players.find(
+          (player) => player.id === choiceView.currentPlayerId,
+        )?.marks.compat_choice,
         1,
       );
       assert.deepEqual(

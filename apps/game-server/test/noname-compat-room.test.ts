@@ -115,3 +115,59 @@ test("命令与事件上下文映射实际操作者和所选目标", async () =>
     commandType: "endTurn",
   });
 });
+
+test("高级 Mod 选择请求可快照、校验响应并无代码回放", async () => {
+  const pack = advancedPack();
+  pack.runtime!.permissions.push("player-choice");
+  pack.runtime!.source = `(input) => input.hook === "afterCommand"
+    ? ({ request: { playerId: input.context.actorPlayerId, selection: {
+        id: "pick_path", prompt: "选择路线", kind: "option", min: 1, max: 1,
+        options: [{ id: "advance", label: "前进" }, { id: "wait", label: "等待" }],
+      } } })
+    : ({ state: { picked: input.context.choice.optionId }, effects: [
+        { type: "addMark", target: "self", mark: "choice_done", count: 1 },
+      ] })`;
+  const current = game();
+  const runtime = new NonameCompatRoomRuntime([pack], "choice-seed");
+  await runtime.run("afterCommand", current, 0, {
+    command: { type: "endTurn", playerId: "b" },
+    actorPlayerId: "b",
+    events: [],
+  });
+  const pending = runtime.pendingChoice();
+  assert.equal(pending?.playerId, "b");
+  assert.equal(pending?.selection.kind, "option");
+  const restored = NonameCompatRoomRuntime.restore(
+    [pack],
+    "choice-seed",
+    runtime.snapshot(),
+  );
+  await assert.rejects(
+    restored.respond(
+      current,
+      "a",
+      { requestId: pending!.requestId, optionId: "advance" },
+      1,
+    ),
+    /不属于当前玩家/,
+  );
+  await restored.respond(
+    current,
+    "b",
+    { requestId: pending!.requestId, optionId: "advance" },
+    1,
+  );
+  assert.equal(restored.pendingChoice(), undefined);
+  assert.equal(
+    current.state.players.find((player) => player.id === "b")?.marks
+      .choice_done,
+    1,
+  );
+
+  const replayGame = game();
+  const replay = new NonameCompatRoomRuntime([pack], "choice-seed");
+  for (const record of restored.snapshot().records)
+    replay.replay(record, replayGame);
+  assert.equal(replay.pendingChoice(), undefined);
+  assert.equal(replayGame.snapshot(), current.snapshot());
+});

@@ -34,10 +34,28 @@ const runtime = defineRuntime<PluginState>(
           ]
         : []),
     ],
+    request:
+      input.hook === "afterCommand" &&
+      input.context.command?.type === "chooseGeneral"
+        ? {
+            playerId: input.context.actorPlayerId,
+            selection: {
+              id: "opening_plan",
+              prompt: "选择开局策略",
+              kind: "option",
+              min: 1,
+              max: 1,
+              options: [
+                { id: "steady", label: "稳健" },
+                { id: "bold", label: "进取" },
+              ],
+            },
+          }
+        : undefined,
     logs: [`handled ${input.hook}`],
   }),
   {
-    permissions: ["game-state"],
+    permissions: ["game-state", "player-choice"],
     timeoutMs: 500,
     memoryMb: 32,
   },

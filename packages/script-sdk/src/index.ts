@@ -20,7 +20,7 @@ export const NONAME_COMPAT_UPSTREAM_COMMIT =
 
 export interface RuntimeHookInput<State = unknown> {
   apiVersion: "noname-compat/v1";
-  hook: "roomStart" | "afterCommand";
+  hook: "roomStart" | "afterCommand" | "choiceResponse";
   hookIndex: number;
   commandIndex?: number;
   packageId: string;
@@ -42,6 +42,14 @@ export interface RuntimeHookInput<State = unknown> {
     >;
     actorPlayerId?: string;
     selectedPlayerId?: string;
+    choice?: {
+      requestId: string;
+      cardIds?: string[];
+      targetIds?: string[];
+      optionId?: string;
+      numberValue?: number;
+      suit?: "spade" | "heart" | "club" | "diamond";
+    };
   };
 }
 
@@ -49,6 +57,10 @@ export interface RuntimeHookOutput<State = unknown> {
   state?: State;
   effects?: EffectDto[];
   logs?: string[];
+  request?: {
+    playerId?: string;
+    selection: SkillSelectionDto;
+  };
 }
 
 export type RuntimeHook<State = unknown> = (

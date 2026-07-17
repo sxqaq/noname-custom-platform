@@ -704,8 +704,11 @@ function GameTable({
   const choosingTuxi = game.pending?.kind === "tuxi";
   const customSkillPending =
     game.pending?.kind === "customSkill" ? game.pending : undefined;
-  const choosingCustomTarget = customSkillPending?.selection.kind === "target";
-  const choosingCustomCard = customSkillPending?.selection.kind === "card";
+  const modChoicePending =
+    game.pending?.kind === "modChoice" ? game.pending : undefined;
+  const interactiveChoice = customSkillPending ?? modChoicePending;
+  const choosingCustomTarget = interactiveChoice?.selection.kind === "target";
+  const choosingCustomCard = interactiveChoice?.selection.kind === "card";
   const mustRespond = Boolean(
     game.pending &&
     game.pending.kind !== "discard" &&
@@ -723,6 +726,7 @@ function GameTable({
     game.pending.kind !== "jianxiong" &&
     game.pending.kind !== "yijiChoice" &&
     game.pending.kind !== "customSkill" &&
+    game.pending.kind !== "modChoice" &&
     game.pending.kind !== "selectGeneral",
   );
   const mustChooseWugu = game.pending?.kind === "wugu";
@@ -867,11 +871,12 @@ function GameTable({
             {((myTurn && selectedSkill) ||
               (choosingTuxi && player.id !== selfId && player.handCount > 0) ||
               (choosingCustomTarget &&
-                (customSkillPending.selection.targetFilter !== "self" ||
+                interactiveChoice &&
+                (interactiveChoice.selection.targetFilter !== "self" ||
                   player.id === selfId) &&
-                (customSkillPending.selection.targetFilter !== "other" ||
+                (interactiveChoice.selection.targetFilter !== "other" ||
                   player.id !== selfId) &&
-                (customSkillPending.selection.targetFilter !== "wounded" ||
+                (interactiveChoice.selection.targetFilter !== "wounded" ||
                   player.hp < player.maxHp))) &&
               player.alive && (
                 <button
@@ -975,7 +980,7 @@ function GameTable({
             selectedSkill,
           )) ||
           (choosingCustomCard &&
-            customSkillPending.selection.cardZone === "own")) &&
+            interactiveChoice?.selection.cardZone === "own")) &&
           Object.values(me?.equipment ?? {}).map((card) => (
             <button
               className={
@@ -1503,39 +1508,39 @@ function GameTable({
             发动突袭（已选 {skillTargets.length}/2 个目标，可选 0 个）
           </button>
         )}
-        {customSkillPending && (
+        {interactiveChoice && (
           <div className="notice">
-            <strong>{customSkillPending.skillName}</strong>
-            <span>{customSkillPending.selection.prompt}</span>
-            {customSkillPending.selection.kind === "option" && (
+            <strong>
+              {customSkillPending?.skillName ?? modChoicePending?.packageName}
+            </strong>
+            <span>{interactiveChoice.selection.prompt}</span>
+            {interactiveChoice.selection.kind === "option" && (
               <select
                 value={
-                  skillOption ?? customSkillPending.selection.options?.[0]?.id
+                  skillOption ?? interactiveChoice.selection.options?.[0]?.id
                 }
                 onChange={(event) => setSkillOption(event.target.value)}
               >
-                {customSkillPending.selection.options?.map((option) => (
+                {interactiveChoice.selection.options?.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
                 ))}
               </select>
             )}
-            {customSkillPending.selection.kind === "number" && (
+            {interactiveChoice.selection.kind === "number" && (
               <input
                 type="number"
-                min={customSkillPending.selection.min}
-                max={customSkillPending.selection.max}
-                value={skillNumber ?? customSkillPending.selection.min}
+                min={interactiveChoice.selection.min}
+                max={interactiveChoice.selection.max}
+                value={skillNumber ?? interactiveChoice.selection.min}
                 onChange={(event) => setSkillNumber(Number(event.target.value))}
               />
             )}
-            {customSkillPending.selection.kind === "suit" && (
+            {interactiveChoice.selection.kind === "suit" && (
               <select
                 value={
-                  skillSuit ??
-                  customSkillPending.selection.suits?.[0] ??
-                  "spade"
+                  skillSuit ?? interactiveChoice.selection.suits?.[0] ?? "spade"
                 }
                 onChange={(event) =>
                   setSkillSuit(
@@ -1545,7 +1550,7 @@ function GameTable({
                 }
               >
                 {(
-                  customSkillPending.selection.suits ?? [
+                  interactiveChoice.selection.suits ?? [
                     "spade",
                     "heart",
                     "club",
@@ -1567,40 +1572,47 @@ function GameTable({
             )}
             <button
               disabled={
-                (customSkillPending.selection.kind === "card" ||
-                  customSkillPending.selection.kind === "target") &&
-                ((customSkillPending.selection.kind === "card"
+                (interactiveChoice.selection.kind === "card" ||
+                  interactiveChoice.selection.kind === "target") &&
+                ((interactiveChoice.selection.kind === "card"
                   ? skillCards.length
-                  : skillTargets.length) < customSkillPending.selection.min ||
-                  (customSkillPending.selection.kind === "card"
+                  : skillTargets.length) < interactiveChoice.selection.min ||
+                  (interactiveChoice.selection.kind === "card"
                     ? skillCards.length
-                    : skillTargets.length) > customSkillPending.selection.max)
+                    : skillTargets.length) > interactiveChoice.selection.max)
               }
               onClick={() => {
                 act({
-                  action: "activateSkill",
-                  skillId: customSkillPending.skillId,
+                  ...(modChoicePending
+                    ? {
+                        action: "modChoice" as const,
+                        requestId: modChoicePending.requestId,
+                      }
+                    : {
+                        action: "activateSkill" as const,
+                        skillId: customSkillPending!.skillId,
+                      }),
                   cardIds:
-                    customSkillPending.selection.kind === "card"
+                    interactiveChoice.selection.kind === "card"
                       ? skillCards
                       : undefined,
                   targetIds:
-                    customSkillPending.selection.kind === "target"
+                    interactiveChoice.selection.kind === "target"
                       ? skillTargets
                       : undefined,
                   optionId:
-                    customSkillPending.selection.kind === "option"
+                    interactiveChoice.selection.kind === "option"
                       ? (skillOption ??
-                        customSkillPending.selection.options?.[0]?.id)
+                        interactiveChoice.selection.options?.[0]?.id)
                       : undefined,
                   numberValue:
-                    customSkillPending.selection.kind === "number"
-                      ? (skillNumber ?? customSkillPending.selection.min)
+                    interactiveChoice.selection.kind === "number"
+                      ? (skillNumber ?? interactiveChoice.selection.min)
                       : undefined,
                   suit:
-                    customSkillPending.selection.kind === "suit"
+                    interactiveChoice.selection.kind === "suit"
                       ? (skillSuit ??
-                        customSkillPending.selection.suits?.[0] ??
+                        interactiveChoice.selection.suits?.[0] ??
                         "spade")
                       : undefined,
                 });
@@ -1611,13 +1623,13 @@ function GameTable({
                 setSkillSuit(undefined);
               }}
             >
-              {customSkillPending.selection.kind === "card" ||
-              customSkillPending.selection.kind === "target"
+              {interactiveChoice.selection.kind === "card" ||
+              interactiveChoice.selection.kind === "target"
                 ? `确认选择（${
-                    customSkillPending.selection.kind === "card"
+                    interactiveChoice.selection.kind === "card"
                       ? skillCards.length
                       : skillTargets.length
-                  }/${customSkillPending.selection.min}–${customSkillPending.selection.max}）`
+                  }/${interactiveChoice.selection.min}–${interactiveChoice.selection.max}）`
                 : "确认选择"}
             </button>
           </div>

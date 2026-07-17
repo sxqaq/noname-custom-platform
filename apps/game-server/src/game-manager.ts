@@ -13,6 +13,7 @@ import type {
 import {
   NonameCompatRoomRuntime,
   type NonameCompatHookRecord,
+  type NonameCompatPendingChoice,
 } from "./noname-compat-room.js";
 
 interface RunningGame {
@@ -26,12 +27,25 @@ interface RunningGame {
     generalSelection?: boolean;
     compatSeed: string;
   };
-  commands: GameCommand[];
+  commands: RecordedCommand[];
   replayId: string;
   roomName: string;
   createdAt: string;
   updatedAt: number;
 }
+interface CompatChoiceCommand {
+  type: "compatChoice";
+  playerId: string;
+  response: {
+    requestId: string;
+    cardIds?: string[];
+    targetIds?: string[];
+    optionId?: string;
+    numberValue?: number;
+    suit?: "spade" | "heart" | "club" | "diamond";
+  };
+}
+type RecordedCommand = GameCommand | CompatChoiceCommand;
 export class GameManager {
   private games = new Map<string, RunningGame>();
   private replays: ReplayDto[] = [];
@@ -85,10 +99,25 @@ export class GameManager {
           cardIds?: string[];
           targetIds?: string[];
         }
+      | {
+          action: "modChoice";
+          requestId: string;
+          cardIds?: string[];
+          targetIds?: string[];
+          optionId?: string;
+          numberValue?: number;
+          suit?: "spade" | "heart" | "club" | "diamond";
+        }
       | { action: "discardCards"; cardIds: string[] }
       | { action: "endTurn" },
   ) {
     const running = this.require(roomId);
+    if (action.action === "modChoice") {
+      await this.applyCompatChoice(running, playerId, action);
+      return;
+    }
+    if (running.compat.pendingChoice())
+      throw new Error("高级 Mod 正在等待玩家选择");
     const command: GameCommand =
       action.action === "chooseGeneral"
         ? {
@@ -137,6 +166,15 @@ export class GameManager {
   async automate(roomId: string) {
     const running = this.require(roomId);
     if (running.game.state.status === "finished") return false;
+    const compatPending = running.compat.pendingChoice();
+    if (compatPending) {
+      await this.applyCompatChoice(
+        running,
+        compatPending.playerId,
+        aiChoice(compatPending, running.game),
+      );
+      return true;
+    }
     const command = chooseAiCommand(running.game);
     await this.applyCommand(running, command);
     return true;
@@ -149,18 +187,28 @@ export class GameManager {
   ) {
     const running = this.require(room.id);
     if (running.game.state.status === "finished") return false;
+    const compatPending = running.compat.pendingChoice();
     const pending = running.game.state.pending;
     const expected =
-      pending?.kind === "dying"
+      compatPending?.playerId ??
+      (pending?.kind === "dying"
         ? pending.responders[pending.responderIndex]
-        : (pending?.playerId ?? running.game.state.currentPlayerId);
+        : (pending?.playerId ?? running.game.state.currentPlayerId));
     const offline =
       room.players.find((player) => player.id === expected)?.status ===
       "offline";
     return now - running.updatedAt >= (offline ? offlineMs : onlineMs);
   }
   view(roomId: string, playerId: string) {
-    return this.require(roomId).game.viewFor(playerId) as GameView;
+    const running = this.require(roomId);
+    const view = running.game.viewFor(playerId) as GameView;
+    const pending = running.compat.pendingChoice();
+    if (!pending) return view;
+    view.pending =
+      pending.playerId === playerId
+        ? { kind: "modChoice", ...pending }
+        : undefined;
+    return view;
   }
   listReplays() {
     return structuredClone(this.replays);
@@ -181,18 +229,16 @@ export class GameManager {
     );
     const hooks = running.compat.snapshot().records;
     hooks
-      .filter((record) => record.hook === "roomStart")
+      .filter(
+        (record) =>
+          record.hook === "roomStart" && record.commandIndex === undefined,
+      )
       .forEach((record) => compat.replay(record, game));
     running.commands.slice(0, count).forEach((command, commandIndex) => {
-      const events = game.dispatch(command);
-      const context = hookContext(command, events);
+      if (command.type !== "compatChoice") game.dispatch(command);
       hooks
-        .filter(
-          (record) =>
-            record.hook === "afterCommand" &&
-            record.commandIndex === commandIndex,
-        )
-        .forEach((record) => compat.replay(record, game, context));
+        .filter((record) => record.commandIndex === commandIndex)
+        .forEach((record) => compat.replay(record, game));
     });
     return {
       id,
@@ -219,6 +265,41 @@ export class GameManager {
         hookContext(command, events),
       );
       running.commands.push(command);
+      running.updatedAt = Date.now();
+      this.saveReplay(running);
+    } catch (error) {
+      running.game = HeadlessGame.restore(gameBefore, running.config.packages);
+      running.compat = NonameCompatRoomRuntime.restore(
+        running.config.packages,
+        running.config.compatSeed,
+        compatBefore,
+      );
+      throw error;
+    }
+  }
+  private async applyCompatChoice(
+    running: RunningGame,
+    playerId: string,
+    response: CompatChoiceCommand["response"] & {
+      action?: "modChoice";
+    },
+  ) {
+    const gameBefore = running.game.snapshot();
+    const compatBefore = running.compat.snapshot();
+    const commandIndex = running.commands.length;
+    const { action: _, ...choice } = response;
+    try {
+      await running.compat.respond(
+        running.game,
+        playerId,
+        choice,
+        commandIndex,
+      );
+      running.commands.push({
+        type: "compatChoice",
+        playerId,
+        response: structuredClone(choice),
+      });
       running.updatedAt = Date.now();
       this.saveReplay(running);
     } catch (error) {
@@ -264,5 +345,45 @@ function hookContext(
     events,
     actorPlayerId: command.playerId,
     selectedPlayerId,
+  };
+}
+
+function aiChoice(pending: NonameCompatPendingChoice, game: HeadlessGame) {
+  const selection = pending.selection;
+  const self = game.state.players.find(
+    (player) => player.id === pending.playerId,
+  )!;
+  const targets = game.state.players.filter((player) => {
+    if (!player.alive) return false;
+    if (selection.kind !== "target") return false;
+    if (selection.targetFilter === "self") return player.id === self.id;
+    if (selection.targetFilter === "other") return player.id !== self.id;
+    if (selection.targetFilter === "wounded") return player.hp < player.maxHp;
+    return true;
+  });
+  const cards =
+    selection.kind === "card"
+      ? [
+          ...(selection.cardZone === "hand" || selection.cardZone === "own"
+            ? self.hand.map((card) => card.id)
+            : []),
+          ...(selection.cardZone === "own"
+            ? Object.values(self.equipment).map((card) => card.id)
+            : []),
+        ]
+      : [];
+  return {
+    action: "modChoice" as const,
+    requestId: pending.requestId,
+    targetIds:
+      selection.kind === "target"
+        ? targets.slice(0, selection.min).map((player) => player.id)
+        : undefined,
+    cardIds:
+      selection.kind === "card" ? cards.slice(0, selection.min) : undefined,
+    optionId:
+      selection.kind === "option" ? selection.options?.[0]?.id : undefined,
+    numberValue: selection.kind === "number" ? selection.min : undefined,
+    suit: selection.kind === "suit" ? selection.suits?.[0] : undefined,
   };
 }

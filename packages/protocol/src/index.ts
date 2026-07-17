@@ -494,6 +494,14 @@ export interface GameView {
         selectedTargetIds: string[];
         selectedValues: Record<string, number>;
       }
+    | {
+        playerId: string;
+        kind: "modChoice";
+        packageId: string;
+        packageName: string;
+        requestId: string;
+        selection: SkillSelectionDto;
+      }
     | { playerId: string; kind: "discard"; count: number };
   deckCount: number;
   discard: CardView[];
@@ -511,10 +519,11 @@ export interface ReplayDto {
   compatHooks?: Array<{
     index: number;
     packageId: string;
-    hook: "roomStart" | "afterCommand";
+    hook: "roomStart" | "afterCommand" | "choiceResponse";
     commandIndex?: number;
     inputHash: string;
     output: unknown;
+    context?: unknown;
   }>;
 }
 
@@ -558,6 +567,15 @@ export type ClientMessage =
         | {
             action: "activateSkill";
             skillId: string;
+            cardIds?: string[];
+            targetIds?: string[];
+            optionId?: string;
+            numberValue?: number;
+            suit?: "spade" | "heart" | "club" | "diamond";
+          }
+        | {
+            action: "modChoice";
+            requestId: string;
             cardIds?: string[];
             targetIds?: string[];
             optionId?: string;

@@ -164,7 +164,7 @@ node scripts/e2e-smoke.mjs
 node scripts/e2e-content.mjs
 ```
 
-当前验收结果：128 项工作区测试通过；真实双客户端房间与自定义内容 E2E 通过，其中多段代码插件通过在线 WebSocket 完成选牌、选目标和效果结算；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，确定性摘要为 `a36c6fb3…96fefe`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
+当前验收结果：150 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、玩家选择、断线重连和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，确定性摘要为 `a36c6fb3…96fefe`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
 
 ## 安全与数据说明
 
