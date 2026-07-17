@@ -1270,6 +1270,40 @@ export class HeadlessGame {
       throw error;
     }
   }
+  applyExternalEffects(
+    effects: Effect[],
+    sourceId = this.state.currentPlayerId,
+    selectedId?: string,
+    hookId = "external-mod",
+  ) {
+    if (this.state.status !== "playing") throw new Error("游戏已经结束");
+    const stateBefore = structuredClone(this.state);
+    const rngBefore = this.rng.state;
+    const queuedBefore = structuredClone(this.queuedOptionalDraws);
+    const suppressedBefore = new Set(this.suppressLianying);
+    const before = this.state.sequence;
+    try {
+      const source = this.player(sourceId);
+      const selected = selectedId ? this.player(selectedId) : undefined;
+      this.applyEffects(
+        structuredClone(effects),
+        source,
+        source,
+        selected,
+        hookId,
+      );
+      this.flushOptionalDraws();
+      this.state.rngState = this.rng.state;
+      this.log("mod.hook", `${hookId} 已由权威引擎执行`);
+      return this.state.log.filter((item) => item.sequence > before);
+    } catch (error) {
+      this.state = stateBefore;
+      this.rng.state = rngBefore;
+      this.queuedOptionalDraws = queuedBefore;
+      this.suppressLianying = suppressedBefore;
+      throw error;
+    }
+  }
   viewFor(playerId?: string) {
     const viewer = this.player(playerId ?? "", false);
     const pendingViewer =

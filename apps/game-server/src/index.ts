@@ -267,16 +267,23 @@ export function startHostRuntime(
   const cleanupTimer = setInterval(() => {
     if (rooms.cleanupIdle().length) broadcastLobby();
   }, 60_000).unref();
-  const automationTimer = setInterval(() => {
-    for (const summary of rooms.list()) {
-      if (summary.state !== "playing") continue;
-      const room = rooms.state(summary.id);
-      try {
-        if (games.automationDue(room) && games.automate(room.id))
-          broadcastRoom(room.id);
-      } catch (error) {
-        console.error("automation failed", error);
+  let automationRunning = false;
+  const automationTimer = setInterval(async () => {
+    if (automationRunning) return;
+    automationRunning = true;
+    try {
+      for (const summary of rooms.list()) {
+        if (summary.state !== "playing") continue;
+        const room = rooms.state(summary.id);
+        try {
+          if (games.automationDue(room) && (await games.automate(room.id)))
+            broadcastRoom(room.id);
+        } catch (error) {
+          console.error("automation failed", error);
+        }
       }
+    } finally {
+      automationRunning = false;
     }
   }, 1_000).unref();
   function send(socket: WebSocket, message: ServerMessage) {
@@ -350,7 +357,7 @@ export function startHostRuntime(
     const roomIdOnConnect = rooms.roomIdFor(token);
     if (roomIdOnConnect) broadcastRoom(roomIdOnConnect);
 
-    socket.on("message", (raw) => {
+    socket.on("message", async (raw) => {
       let message: ClientMessage;
       try {
         message = JSON.parse(raw.toString()) as ClientMessage;
@@ -393,7 +400,7 @@ export function startHostRuntime(
           case "room.start": {
             const room = rooms.start(token);
             roomId = room.id;
-            games.start(room, registry.packagesFor(room.contentLock));
+            await games.start(room, registry.packagesFor(room.contentLock));
             break;
           }
           case "room.leave": {
@@ -406,7 +413,7 @@ export function startHostRuntime(
             const playerId = rooms.playerIdFor(token);
             if (!roomId || !playerId)
               throw new RoomError("NOT_IN_ROOM", "尚未加入对局");
-            games.action(roomId, playerId, message.payload);
+            await games.action(roomId, playerId, message.payload);
             break;
           }
           case "package.publish":

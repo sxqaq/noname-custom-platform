@@ -508,6 +508,14 @@ export interface ReplayDto {
   players: Array<{ id: string; name: string }>;
   commands: unknown[];
   finalSequence: number;
+  compatHooks?: Array<{
+    index: number;
+    packageId: string;
+    hook: "roomStart" | "afterCommand";
+    commandIndex?: number;
+    inputHash: string;
+    output: unknown;
+  }>;
 }
 
 export type ClientMessage =

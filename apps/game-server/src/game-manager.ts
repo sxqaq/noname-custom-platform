@@ -2,7 +2,6 @@ import { randomInt, randomUUID } from "node:crypto";
 import {
   HeadlessGame,
   chooseAiCommand,
-  type ContentPackage,
   type GameCommand,
 } from "@sgs/headless-engine";
 import type {
@@ -11,15 +10,21 @@ import type {
   ReplayDto,
   RoomState,
 } from "@sgs/protocol";
+import {
+  NonameCompatRoomRuntime,
+  type NonameCompatHookRecord,
+} from "./noname-compat-room.js";
 
 interface RunningGame {
   game: HeadlessGame;
+  compat: NonameCompatRoomRuntime;
   config: {
     seed: number;
     players: Array<{ id: string; name: string }>;
-    packages: ContentPackage[];
+    packages: ExtensionPackageDto[];
     modeId?: string;
     generalSelection?: boolean;
+    compatSeed: string;
   };
   commands: GameCommand[];
   replayId: string;
@@ -30,16 +35,22 @@ interface RunningGame {
 export class GameManager {
   private games = new Map<string, RunningGame>();
   private replays: ReplayDto[] = [];
-  start(room: RoomState, packages: ExtensionPackageDto[]) {
+  async start(room: RoomState, packages: ExtensionPackageDto[]) {
+    const seed = randomInt(1, 0x7fffffff);
     const config = {
-      seed: randomInt(1, 0x7fffffff),
+      seed,
       players: room.players.map(({ id, name }) => ({ id, name })),
-      packages: packages as ContentPackage[],
+      packages,
       modeId: room.modeId,
       generalSelection: true,
+      compatSeed: `${room.id}:${seed}`,
     };
+    const game = HeadlessGame.create(config);
+    const compat = new NonameCompatRoomRuntime(packages, config.compatSeed);
+    await compat.run("roomStart", game);
     const running: RunningGame = {
-      game: HeadlessGame.create(config),
+      game,
+      compat,
       config,
       commands: [],
       replayId: randomUUID(),
@@ -50,7 +61,7 @@ export class GameManager {
     this.games.set(room.id, running);
     this.saveReplay(running);
   }
-  action(
+  async action(
     roomId: string,
     playerId: string,
     action:
@@ -83,50 +94,48 @@ export class GameManager {
             generalId: action.generalId,
           }
         : action.action === "useCard"
-        ? {
-            type: "useCard",
-            playerId,
-            cardId: action.cardId,
-            targetId: action.targetId,
-            targetIds: action.targetIds,
-          }
-        : action.action === "respond"
-          ? { type: "respond", playerId, cardId: action.cardId }
-          : action.action === "chooseCard"
-            ? { type: "chooseCard", playerId, cardId: action.cardId }
-            : action.action === "chooseSuit"
-              ? { type: "chooseSuit", playerId, suit: action.suit }
-              : action.action === "arrangeCards"
-                ? {
-                    type: "arrangeCards",
-                    playerId,
-                    topIds: action.topIds,
-                    bottomIds: action.bottomIds,
-                  }
-              : action.action === "activateSkill"
-                ? {
-                    type: "activateSkill",
-                    playerId,
-                    skillId: action.skillId,
-                    cardIds: action.cardIds,
-                    targetIds: action.targetIds,
-                  }
-                : action.action === "discardCards"
-                  ? { type: "discardCards", playerId, cardIds: action.cardIds }
-                  : { type: "endTurn", playerId };
-    running.game.dispatch(command);
-    running.commands.push(command);
-    running.updatedAt = Date.now();
-    this.saveReplay(running);
+          ? {
+              type: "useCard",
+              playerId,
+              cardId: action.cardId,
+              targetId: action.targetId,
+              targetIds: action.targetIds,
+            }
+          : action.action === "respond"
+            ? { type: "respond", playerId, cardId: action.cardId }
+            : action.action === "chooseCard"
+              ? { type: "chooseCard", playerId, cardId: action.cardId }
+              : action.action === "chooseSuit"
+                ? { type: "chooseSuit", playerId, suit: action.suit }
+                : action.action === "arrangeCards"
+                  ? {
+                      type: "arrangeCards",
+                      playerId,
+                      topIds: action.topIds,
+                      bottomIds: action.bottomIds,
+                    }
+                  : action.action === "activateSkill"
+                    ? {
+                        type: "activateSkill",
+                        playerId,
+                        skillId: action.skillId,
+                        cardIds: action.cardIds,
+                        targetIds: action.targetIds,
+                      }
+                    : action.action === "discardCards"
+                      ? {
+                          type: "discardCards",
+                          playerId,
+                          cardIds: action.cardIds,
+                        }
+                      : { type: "endTurn", playerId };
+    await this.applyCommand(running, command);
   }
-  automate(roomId: string) {
+  async automate(roomId: string) {
     const running = this.require(roomId);
     if (running.game.state.status === "finished") return false;
     const command = chooseAiCommand(running.game);
-    running.game.dispatch(command);
-    running.commands.push(command);
-    running.updatedAt = Date.now();
-    this.saveReplay(running);
+    await this.applyCommand(running, command);
     return true;
   }
   automationDue(
@@ -163,9 +172,24 @@ export class GameManager {
       Math.min(step ?? running.commands.length, running.commands.length),
     );
     const game = HeadlessGame.create(running.config);
-    running.commands
-      .slice(0, count)
-      .forEach((command) => game.dispatch(command));
+    const compat = new NonameCompatRoomRuntime(
+      running.config.packages,
+      running.config.compatSeed,
+    );
+    const hooks = running.compat.snapshot().records;
+    hooks
+      .filter((record) => record.hook === "roomStart")
+      .forEach((record) => compat.replay(record, game));
+    running.commands.slice(0, count).forEach((command, commandIndex) => {
+      game.dispatch(command);
+      hooks
+        .filter(
+          (record) =>
+            record.hook === "afterCommand" &&
+            record.commandIndex === commandIndex,
+        )
+        .forEach((record) => compat.replay(record, game));
+    });
     return {
       id,
       step: count,
@@ -178,6 +202,26 @@ export class GameManager {
     if (!game) throw new Error("对局尚未创建");
     return game;
   }
+  private async applyCommand(running: RunningGame, command: GameCommand) {
+    const gameBefore = running.game.snapshot();
+    const compatBefore = running.compat.snapshot();
+    const commandIndex = running.commands.length;
+    try {
+      running.game.dispatch(command);
+      await running.compat.run("afterCommand", running.game, commandIndex);
+      running.commands.push(command);
+      running.updatedAt = Date.now();
+      this.saveReplay(running);
+    } catch (error) {
+      running.game = HeadlessGame.restore(gameBefore, running.config.packages);
+      running.compat = NonameCompatRoomRuntime.restore(
+        running.config.packages,
+        running.config.compatSeed,
+        compatBefore,
+      );
+      throw error;
+    }
+  }
   private saveReplay(running: RunningGame) {
     const replay: ReplayDto = {
       id: running.replayId,
@@ -187,6 +231,8 @@ export class GameManager {
       players: running.config.players,
       commands: structuredClone(running.commands),
       finalSequence: running.game.state.sequence,
+      compatHooks: running.compat.snapshot()
+        .records as NonameCompatHookRecord[],
     };
     const index = this.replays.findIndex((item) => item.id === replay.id);
     if (index < 0) this.replays.unshift(replay);
