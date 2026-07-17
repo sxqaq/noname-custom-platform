@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { validatePackage } from "@sgs/content-schema";
-import { HeadlessGame, type Effect } from "@sgs/headless-engine";
+import {
+  HeadlessGame,
+  type Effect,
+  type GameCommand,
+  type GameLog,
+} from "@sgs/headless-engine";
 import { evaluateIsolatedMod } from "@sgs/noname-adapter";
 import type { EffectDto, ExtensionPackageDto } from "@sgs/protocol";
 
@@ -24,6 +29,13 @@ export interface NonameCompatRoomSnapshot {
   nextHookIndex: number;
   states: Record<string, unknown>;
   records: NonameCompatHookRecord[];
+}
+
+export interface NonameCompatHookContext {
+  command?: GameCommand;
+  events?: GameLog[];
+  actorPlayerId?: string;
+  selectedPlayerId?: string;
 }
 
 interface HookOutput {
@@ -57,11 +69,23 @@ export class NonameCompatRoomRuntime {
     return runtime;
   }
 
-  async run(hook: NonameCompatHook, game: HeadlessGame, commandIndex?: number) {
+  async run(
+    hook: NonameCompatHook,
+    game: HeadlessGame,
+    commandIndex?: number,
+    context: NonameCompatHookContext = {},
+  ) {
     for (const pack of this.packages) {
       if (!pack.runtime) continue;
       const index = this.nextHookIndex++;
-      const input = this.createInput(pack, hook, game, index, commandIndex);
+      const input = this.createInput(
+        pack,
+        hook,
+        game,
+        index,
+        commandIndex,
+        context,
+      );
       const output = await evaluateIsolatedMod<HookOutput>({
         source: pack.runtime.source,
         input,
@@ -73,8 +97,8 @@ export class NonameCompatRoomRuntime {
       if (normalized.effects.length) {
         game.applyExternalEffects(
           normalized.effects as Effect[],
-          game.state.currentPlayerId,
-          undefined,
+          context.actorPlayerId ?? game.state.currentPlayerId,
+          context.selectedPlayerId,
           `${pack.id}:${hook}`,
         );
       }
@@ -90,7 +114,11 @@ export class NonameCompatRoomRuntime {
     }
   }
 
-  replay(record: NonameCompatHookRecord, game: HeadlessGame) {
+  replay(
+    record: NonameCompatHookRecord,
+    game: HeadlessGame,
+    context: NonameCompatHookContext = {},
+  ) {
     if (record.index !== this.nextHookIndex)
       throw new Error("兼容 Mod 回放钩子顺序不一致");
     const pack = this.packages.find((item) => item.id === record.packageId);
@@ -101,14 +129,15 @@ export class NonameCompatRoomRuntime {
       game,
       record.index,
       record.commandIndex,
+      context,
     );
     if (hash(input) !== record.inputHash)
       throw new Error(`兼容扩展 ${pack.id} 回放输入状态分叉`);
     if (record.output.effects.length)
       game.applyExternalEffects(
         record.output.effects as Effect[],
-        game.state.currentPlayerId,
-        undefined,
+        context.actorPlayerId ?? game.state.currentPlayerId,
+        context.selectedPlayerId,
         `${pack.id}:${record.hook}`,
       );
     this.states.set(pack.id, structuredClone(record.output.state));
@@ -133,6 +162,7 @@ export class NonameCompatRoomRuntime {
     game: HeadlessGame,
     index: number,
     commandIndex?: number,
+    context: NonameCompatHookContext = {},
   ) {
     const fullState = pack.runtime!.permissions.includes("game-state");
     return {
@@ -142,6 +172,12 @@ export class NonameCompatRoomRuntime {
       commandIndex,
       packageId: pack.id,
       state: structuredClone(this.states.get(pack.id)),
+      context: {
+        command: structuredClone(context.command),
+        events: structuredClone(context.events ?? []),
+        actorPlayerId: context.actorPlayerId,
+        selectedPlayerId: context.selectedPlayerId,
+      },
       game: fullState
         ? JSON.parse(game.snapshot())
         : {

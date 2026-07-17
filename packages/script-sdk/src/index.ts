@@ -26,6 +26,23 @@ export interface RuntimeHookInput<State = unknown> {
   packageId: string;
   state?: State;
   game: Readonly<Record<string, unknown>>;
+  context: {
+    command?: Readonly<{
+      type: string;
+      playerId: string;
+      [key: string]: unknown;
+    }>;
+    events: ReadonlyArray<
+      Readonly<{
+        sequence: number;
+        type: string;
+        message: string;
+        [key: string]: unknown;
+      }>
+    >;
+    actorPlayerId?: string;
+    selectedPlayerId?: string;
+  };
 }
 
 export interface RuntimeHookOutput<State = unknown> {

@@ -109,7 +109,7 @@ export default definePlugin({
 
 ## 高级运行时插件
 
-`defineRuntime()` 接收一个同步、自包含的 TypeScript 函数。函数只能使用输入、JavaScript 内建值和宿主提供的确定性 `Math.random`；不能捕获导入的帮助函数或模块局部变量。它接收 `roomStart`、`afterCommand` 钩子、上次持久状态和经过权限裁剪的权威游戏状态，返回新状态、规则效果及有限日志。
+`defineRuntime()` 接收一个同步、自包含的 TypeScript 函数。函数只能使用输入、JavaScript 内建值和宿主提供的确定性 `Math.random`；不能捕获导入的帮助函数或模块局部变量。它接收 `roomStart`、`afterCommand` 钩子、上次持久状态、实际命令、命令产生的核心事件、操作者/首个目标以及经过权限裁剪的权威游戏状态，返回新状态、规则效果及有限日志。效果中的 `self` 和 `selected` 分别映射实际操作者和目标，而不是误用当前回合角色。
 
 ```ts
 const runtime = defineRuntime<{ calls: number }>(

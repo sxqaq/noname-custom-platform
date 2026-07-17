@@ -83,3 +83,35 @@ test("未申请状态权限的高级扩展不能返回规则效果", async () =>
     /未申请 game-state 权限/,
   );
 });
+
+test("命令与事件上下文映射实际操作者和所选目标", async () => {
+  const pack = advancedPack();
+  pack.runtime!.source = `(input) => ({
+    state: { commandType: input.context.command?.type },
+    effects: [
+      { type: "addMark", target: "self", mark: "actual_actor", count: 1 },
+      { type: "addMark", target: "selected", mark: "actual_target", count: 1 },
+    ],
+  })`;
+  const current = game();
+  const runtime = new NonameCompatRoomRuntime([pack], "context-seed");
+  await runtime.run("afterCommand", current, 0, {
+    command: { type: "endTurn", playerId: "b" },
+    events: [],
+    actorPlayerId: "b",
+    selectedPlayerId: "a",
+  });
+  assert.equal(
+    current.state.players.find((player) => player.id === "b")?.marks
+      .actual_actor,
+    1,
+  );
+  assert.equal(
+    current.state.players.find((player) => player.id === "a")?.marks
+      .actual_target,
+    1,
+  );
+  assert.deepEqual(runtime.snapshot().states[pack.id], {
+    commandType: "endTurn",
+  });
+});

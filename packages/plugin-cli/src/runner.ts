@@ -152,6 +152,7 @@ async function testAdvancedRuntime(content: ExtensionPackageDto) {
     hookIndex: 0,
     packageId: content.id,
     state: undefined,
+    context: { events: [] },
     game: { status: "playing", sequence: 0, turn: 1, phase: "selectGeneral" },
   };
   const options = {

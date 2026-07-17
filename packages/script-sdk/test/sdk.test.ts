@@ -40,7 +40,12 @@ test("advanced runtime hooks compile to a pinned self-contained manifest", () =>
     (input) => ({
       state: { calls: (input.state?.calls ?? 0) + 1 },
       effects: [
-        { type: "addMark", target: "self", mark: "sdk_calls", count: 1 },
+        {
+          type: "addMark",
+          target: input.context.selectedPlayerId ? "selected" : "self",
+          mark: "sdk_calls",
+          count: 1,
+        },
       ],
     }),
     { permissions: ["game-state", "deterministic-random"] },

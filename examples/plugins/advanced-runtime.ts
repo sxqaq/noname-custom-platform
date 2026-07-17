@@ -12,17 +12,28 @@ interface PluginState {
 const runtime = defineRuntime<PluginState>(
   (input) => ({
     state: { calls: (input.state?.calls ?? 0) + 1 },
-    effects:
-      input.hook === "roomStart"
+    effects: [
+      ...(input.hook === "roomStart"
         ? [
             {
-              type: "addMark",
-              target: "self",
+              type: "addMark" as const,
+              target: "self" as const,
               mark: "advanced_started",
               count: 1,
             },
           ]
-        : [],
+        : []),
+      ...(input.context.selectedPlayerId
+        ? [
+            {
+              type: "addMark" as const,
+              target: "selected" as const,
+              mark: "advanced_targeted",
+              count: 1,
+            },
+          ]
+        : []),
+    ],
     logs: [`handled ${input.hook}`],
   }),
   {

@@ -184,14 +184,15 @@ export class GameManager {
       .filter((record) => record.hook === "roomStart")
       .forEach((record) => compat.replay(record, game));
     running.commands.slice(0, count).forEach((command, commandIndex) => {
-      game.dispatch(command);
+      const events = game.dispatch(command);
+      const context = hookContext(command, events);
       hooks
         .filter(
           (record) =>
             record.hook === "afterCommand" &&
             record.commandIndex === commandIndex,
         )
-        .forEach((record) => compat.replay(record, game));
+        .forEach((record) => compat.replay(record, game, context));
     });
     return {
       id,
@@ -210,8 +211,13 @@ export class GameManager {
     const compatBefore = running.compat.snapshot();
     const commandIndex = running.commands.length;
     try {
-      running.game.dispatch(command);
-      await running.compat.run("afterCommand", running.game, commandIndex);
+      const events = running.game.dispatch(command);
+      await running.compat.run(
+        "afterCommand",
+        running.game,
+        commandIndex,
+        hookContext(command, events),
+      );
       running.commands.push(command);
       running.updatedAt = Date.now();
       this.saveReplay(running);
@@ -241,4 +247,22 @@ export class GameManager {
     if (index < 0) this.replays.unshift(replay);
     else this.replays[index] = replay;
   }
+}
+
+function hookContext(
+  command: GameCommand,
+  events: ReturnType<HeadlessGame["dispatch"]>,
+) {
+  const selectedPlayerId =
+    "targetId" in command
+      ? command.targetId
+      : "targetIds" in command
+        ? command.targetIds?.[0]
+        : undefined;
+  return {
+    command,
+    events,
+    actorPlayerId: command.playerId,
+    selectedPlayerId,
+  };
 }
