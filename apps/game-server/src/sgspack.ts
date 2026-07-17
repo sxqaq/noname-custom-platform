@@ -3,6 +3,7 @@ import type {
   ExtensionPackageDto,
   PublishedPackage,
 } from "@sgs/protocol";
+import { createHash } from "node:crypto";
 import { packageHash, validatePackage } from "@sgs/content-schema";
 import { AssetError, AssetStore } from "./asset-store.js";
 
@@ -14,6 +15,13 @@ export interface SgsPackArchive {
     version: string;
     contentHash: string;
     dependencies: Array<{ id: string; version: string }>;
+    runtime?: {
+      kind: "noname-compat";
+      apiVersion: "noname-compat/v1";
+      upstreamCommit: string;
+      sourceHash: string;
+      permissions: string[];
+    };
   };
   content: ExtensionPackageDto;
   blobs: Array<{
@@ -68,6 +76,17 @@ export async function createSgsPack(
       version: published.content.version,
       contentHash: published.hash,
       dependencies: published.content.dependencies ?? [],
+      runtime: published.content.runtime
+        ? {
+            kind: published.content.runtime.kind,
+            apiVersion: published.content.runtime.apiVersion,
+            upstreamCommit: published.content.runtime.upstreamCommit,
+            sourceHash: createHash("sha256")
+              .update(published.content.runtime.source)
+              .digest("hex"),
+            permissions: [...published.content.runtime.permissions].sort(),
+          }
+        : undefined,
     },
     content: published.content,
     blobs,
@@ -95,6 +114,19 @@ export async function importSgsPack(input: Uint8Array, assets: AssetStore) {
     archive.manifest.contentHash !== hash
   )
     throw new SgsPackError("扩展包清单与内容不匹配");
+  const expectedRuntime = validated.value.runtime
+    ? {
+        kind: validated.value.runtime.kind,
+        apiVersion: validated.value.runtime.apiVersion,
+        upstreamCommit: validated.value.runtime.upstreamCommit,
+        sourceHash: createHash("sha256")
+          .update(validated.value.runtime.source)
+          .digest("hex"),
+        permissions: [...validated.value.runtime.permissions].sort(),
+      }
+    : undefined;
+  if (JSON.stringify(archive.manifest.runtime) !== JSON.stringify(expectedRuntime))
+    throw new SgsPackError("扩展包高级运行时清单与源码不匹配");
   const expected = new Set<string>();
   for (const asset of validated.value.assets ?? []) {
     expected.add(asset.hash);

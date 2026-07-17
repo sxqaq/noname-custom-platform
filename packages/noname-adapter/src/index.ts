@@ -8,6 +8,7 @@ import {
 
 export * from "./compat-realm.js";
 export * from "./interaction-host.js";
+export * from "./isolated-mod-worker.js";
 
 export interface GameCommand {
   playerId: string;

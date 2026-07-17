@@ -249,6 +249,25 @@ export interface ExtensionPackageDto {
   modes: ModeDefinitionDto[];
   tests: ExtensionTestDto[];
   assets?: ExtensionAssetDto[];
+  runtime?: NonameCompatRuntimeDto;
+}
+export type NonameCompatPermissionDto =
+  | "game-state"
+  | "player-choice"
+  | "deterministic-random"
+  | "custom-ui"
+  | "mode-control"
+  | "ai";
+export interface NonameCompatRuntimeDto {
+  kind: "noname-compat";
+  apiVersion: "noname-compat/v1";
+  upstreamCommit: string;
+  source: string;
+  permissions: NonameCompatPermissionDto[];
+  limits: {
+    timeoutMs: number;
+    memoryMb: number;
+  };
 }
 export interface PublishedPackage {
   content: ExtensionPackageDto;

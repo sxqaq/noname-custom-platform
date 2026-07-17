@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   loadPinnedNonameSkillModule,
   NonameInteractionHost,
+  ReplayableNonameExecution,
   type NonameInteractionRecord,
 } from "../src/index.js";
 
@@ -82,6 +83,46 @@ test("真实反间技能可由两段外部玩家输入驱动并确定性回放",
 
   first.module.dispose();
   replay.module.dispose();
+});
+
+test("真实技能可从待交互检查点重建异步执行位置", async () => {
+  let damage = 0;
+  const factory = async (host: NonameInteractionHost) => {
+    const run = await runFanjian(host, () => damage++);
+    try {
+      await run.execution;
+      return "completed";
+    } finally {
+      run.module.dispose();
+    }
+  };
+
+  const original = await ReplayableNonameExecution.start(factory);
+  const suit = await original.waitForRequest();
+  original.submit({
+    requestId: suit.id,
+    playerId: "target",
+    result: { control: "heart2" },
+  });
+  const card = await original.waitForRequest();
+  assert.equal(card.kind, "gainPlayerCard");
+  const checkpoint = await original.checkpoint();
+  assert.equal(checkpoint.journal.length, 1);
+  assert.deepEqual(checkpoint.pending, card);
+
+  const stopped = original.result().catch(() => "stopped");
+  original.dispose("模拟房主进程重启");
+  assert.equal(await stopped, "stopped");
+
+  const restored = await ReplayableNonameExecution.start(factory, checkpoint);
+  assert.deepEqual(await restored.waitForRequest(), card);
+  restored.submit({
+    requestId: card.id,
+    playerId: "target",
+    result: { bool: true, cards: [{ id: "card-1", suit: "spade" }] },
+  });
+  assert.equal(await restored.result(), "completed");
+  assert.equal(damage, 1);
 });
 
 test("交互宿主拒绝其他玩家代答", async () => {

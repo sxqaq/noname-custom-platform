@@ -92,3 +92,26 @@ test("package registry enforces exact dependency installation order", () => {
   registry.remove(base.id, base.version);
   assert.equal(registry.list().length, 0);
 });
+
+test(".sgspack locks advanced runtime source and permissions", async () => {
+  const assets = new AssetStore(join(tmpdir(), `sgspack-runtime-${Date.now()}`));
+  const registry = new PackageRegistry();
+  const value = content("c".repeat(64));
+  value.assets = [];
+  value.runtime = {
+    kind: "noname-compat",
+    apiVersion: "noname-compat/v1",
+    upstreamCommit: "632d2d3c8da2893466a8c440a18861c9ed49813d",
+    source: `() => ({ name: "advanced" })`,
+    permissions: ["game-state", "player-choice"],
+    limits: { timeoutMs: 500, memoryMb: 32 },
+  };
+  const archive = await createSgsPack(registry.publish(value), assets);
+  const parsed = JSON.parse(archive.toString("utf8")) as SgsPackArchive;
+  assert.match(parsed.manifest.runtime!.sourceHash, /^[a-f0-9]{64}$/);
+  parsed.manifest.runtime!.permissions.push("mode-control");
+  await assert.rejects(
+    importSgsPack(Buffer.from(JSON.stringify(parsed)), assets),
+    /运行时清单与源码不匹配/,
+  );
+});

@@ -18,6 +18,9 @@
 - 真实技能 `ganglie.check` 中的 `Math.random` 已替换为可快照、可恢复的种子随机源。
 - 真实技能 `fanjian` 的选择花色、获得手牌两段异步操作已转换为可序列化 `NonameInteractionRequest`，并由指定玩家的外部命令继续执行。
 - 两段交互响应形成日志；重新执行技能并注入相同日志会得到相同结果，响应者身份不匹配会被拒绝。
+- `ReplayableNonameExecution` 可以保存输入日志和当前待选择请求，销毁执行实例后重放到完全相同的异步位置。
+- 高级作者代码可以在一次性 Worker 与内层 VM 中执行；结构化输入、确定性随机、内存上限、执行超时和强制终止已经验证，系统 API、动态代码生成和系统时间不可用。
+- `.sgspack` 已能声明 `noname-compat/v1`、固定上游提交、权限和资源限制，并在清单中锁定编译源码 SHA-256；局域网房主公开相同能力标识。
 - 武将包 ID 和实际路径均限制在固定上游目录内。
 - 当前除带额外 ESM 依赖的 `offline`、`xianding` 外，其余技能模块进入批量加载回归测试。
 
@@ -31,6 +34,23 @@
 4. 在稳定检查点保存随机状态、待选择请求和响应日志；恢复时从检查点重放技能，而不是序列化 JavaScript 调用栈。
 5. 按真实技能测试集标记 `direct`、`shimmed`、`migrated`、`unsupported` 四级兼容性。
 6. 扩展 `.sgspack` 清单，声明兼容 API、权限、上游版本和入口模块。
+
+## 高级扩展清单
+
+高级扩展在普通内容数据之外增加 `runtime`：
+
+```json
+{
+  "kind": "noname-compat",
+  "apiVersion": "noname-compat/v1",
+  "upstreamCommit": "632d2d3c8da2893466a8c440a18861c9ed49813d",
+  "source": "(input) => ({})",
+  "permissions": ["game-state", "player-choice", "deterministic-random"],
+  "limits": { "timeoutMs": 500, "memoryMb": 32 }
+}
+```
+
+源码是 TypeScript 构建后的单入口 JavaScript，最大 1 MiB。清单权限只描述可申请能力，宿主仍按每次调用实际授予最小能力。扩展包内容哈希覆盖完整源码；`.sgspack` 另保存源码哈希，任何源码或权限篡改都会在导入时失败。
 
 ## 完成标准
 

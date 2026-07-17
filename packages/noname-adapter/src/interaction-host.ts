@@ -24,6 +24,12 @@ export interface NonameInteractionRecord {
   result: Record<string, unknown>;
 }
 
+export interface NonameExecutionCheckpoint {
+  version: 1;
+  journal: NonameInteractionRecord[];
+  pending: NonameInteractionRequest;
+}
+
 interface PendingInteraction {
   request: NonameInteractionRequest;
   resolve(result: Record<string, unknown>): void;
@@ -75,6 +81,10 @@ export class NonameInteractionHost {
     return new Promise<NonameInteractionRequest>((resolve) => this.waiters.push(resolve));
   }
 
+  currentRequest() {
+    return this.pending ? structuredClone(this.pending.request) : undefined;
+  }
+
   submit(command: NonameInteractionCommand) {
     const pending = this.pending;
     if (!pending) throw new Error("当前没有等待中的无名杀交互");
@@ -120,6 +130,60 @@ export class NonameInteractionHost {
     });
     for (const waiter of this.waiters.splice(0)) waiter(structuredClone(request));
     return promise;
+  }
+}
+
+export class ReplayableNonameExecution<T> {
+  private constructor(
+    private readonly host: NonameInteractionHost,
+    private readonly completion: Promise<T>,
+  ) {}
+
+  static start<T>(
+    factory: (host: NonameInteractionHost) => Promise<T> | T,
+    checkpoint?: NonameExecutionCheckpoint,
+  ) {
+    if (checkpoint && checkpoint.version !== 1) {
+      throw new Error("不支持的无名杀执行检查点版本");
+    }
+    const host = new NonameInteractionHost(checkpoint?.journal);
+    const completion = Promise.resolve().then(() => factory(host));
+    const execution = new ReplayableNonameExecution(host, completion);
+    if (!checkpoint) return Promise.resolve(execution);
+    return execution.waitForRequest().then((request) => {
+      assertReplayRequest(request, checkpoint.pending);
+      return execution;
+    });
+  }
+
+  waitForRequest() {
+    return Promise.race([
+      this.host.waitForRequest(),
+      this.completion.then(() => {
+        throw new Error("无名杀技能已完成，没有等待中的交互");
+      }),
+    ]);
+  }
+
+  submit(command: NonameInteractionCommand) {
+    this.host.submit(command);
+  }
+
+  async checkpoint(): Promise<NonameExecutionCheckpoint> {
+    const pending = this.host.currentRequest() ?? (await this.waitForRequest());
+    return {
+      version: 1,
+      journal: this.host.journal(),
+      pending,
+    };
+  }
+
+  result() {
+    return this.completion;
+  }
+
+  dispose(reason?: string) {
+    this.host.dispose(reason);
   }
 }
 

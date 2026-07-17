@@ -69,6 +69,7 @@ export function startHostRuntime(
         "package-locks",
         "content-addressed-assets",
         "replays",
+        "noname-compat/v1",
         "same-origin-web",
         ...(config.lanDiscovery ? ["lan-advertisement"] : []),
       ],

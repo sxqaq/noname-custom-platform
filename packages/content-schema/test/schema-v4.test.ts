@@ -168,3 +168,26 @@ test("node graphs reject cycles, broken edges and unreachable nodes", () => {
   if (!broken.ok)
     assert.ok(broken.errors.some((item) => item.includes("不存在的节点")));
 });
+
+test("schema v4 validates isolated noname-compatible runtimes", () => {
+  const value = packageV4();
+  value.runtime = {
+    kind: "noname-compat",
+    apiVersion: "noname-compat/v1",
+    upstreamCommit: "632d2d3c8da2893466a8c440a18861c9ed49813d",
+    source: `({ skills: { test_skill: { trigger: { player: "phaseBegin" } } } })`,
+    permissions: ["game-state", "player-choice", "deterministic-random"],
+    limits: { timeoutMs: 500, memoryMb: 32 },
+  };
+  assert.equal(validatePackage(value).ok, true);
+
+  const unsafe = structuredClone(value);
+  unsafe.runtime!.permissions.push("filesystem" as never);
+  unsafe.runtime!.limits.timeoutMs = 60_000;
+  const result = validatePackage(unsafe);
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.ok(result.errors.some((item) => item.includes("filesystem")));
+    assert.ok(result.errors.some((item) => item.includes("10–5000ms")));
+  }
+});
