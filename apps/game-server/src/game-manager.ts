@@ -35,6 +35,9 @@ interface RunningGame {
 export class GameManager {
   private games = new Map<string, RunningGame>();
   private replays: ReplayDto[] = [];
+  has(roomId: string) {
+    return this.games.has(roomId);
+  }
   async start(room: RoomState, packages: ExtensionPackageDto[]) {
     const seed = randomInt(1, 0x7fffffff);
     const config = {

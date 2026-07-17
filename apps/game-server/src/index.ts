@@ -273,7 +273,7 @@ export function startHostRuntime(
     automationRunning = true;
     try {
       for (const summary of rooms.list()) {
-        if (summary.state !== "playing") continue;
+        if (summary.state !== "playing" || !games.has(summary.id)) continue;
         const room = rooms.state(summary.id);
         try {
           if (games.automationDue(room) && (await games.automate(room.id)))
@@ -320,7 +320,7 @@ export function startHostRuntime(
       type: "room.snapshot",
       payload: { room: rooms.state(roomId), selfPlayerId: playerId },
     });
-    if (rooms.state(roomId).state === "playing")
+    if (rooms.state(roomId).state === "playing" && games.has(roomId))
       send(socket, {
         type: "game.snapshot",
         payload: games.view(roomId, playerId),
@@ -400,7 +400,12 @@ export function startHostRuntime(
           case "room.start": {
             const room = rooms.start(token);
             roomId = room.id;
-            await games.start(room, registry.packagesFor(room.contentLock));
+            try {
+              await games.start(room, registry.packagesFor(room.contentLock));
+            } catch (error) {
+              rooms.rollbackStart(room.id);
+              throw error;
+            }
             break;
           }
           case "room.leave": {

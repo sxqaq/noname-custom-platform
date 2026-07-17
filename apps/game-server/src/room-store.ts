@@ -122,6 +122,17 @@ export class RoomStore {
     this.touch(room);
     return this.publicState(room);
   }
+  rollbackStart(roomId: string) {
+    const room = this.requireRoom(roomId);
+    if (room.state !== "playing") return this.publicState(room);
+    room.state = "waiting";
+    room.players.forEach((player) => {
+      player.status = player.isHost ? "not_ready" : "ready";
+    });
+    room.revision++;
+    this.touch(room);
+    return this.publicState(room);
+  }
   leave(token: string): { roomId?: string; state?: RoomState } {
     const membership = this.sessions.get(token);
     if (!membership) return {};
