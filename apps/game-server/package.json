@@ -16,7 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "host:lan": "node dist/index.js --lan",
-    "test": "tsx --test test/*.test.ts",
+    "test": "node ../../scripts/run-tests.mjs test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

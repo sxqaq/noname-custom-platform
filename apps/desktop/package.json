@@ -1,6 +1,6 @@
 {
   "name": "@sgs/desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "去中心化、可自定义内容的朋友房网页联机主机与客户端",
   "author": "Noname Custom Platform contributors",
   "private": true,
