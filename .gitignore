@@ -9,6 +9,8 @@ coverage/
 .DS_Store
 Thumbs.db
 .tmp-*/
+.agents/
+.codex/
 data/
 apps/game-server/data/
 release/

@@ -25,6 +25,8 @@ export interface GameCommand {
     skillId?: string;
     targetIds?: string[];
     suit?: "spade" | "heart" | "club" | "diamond";
+    optionId?: string;
+    numberValue?: number;
     topIds?: string[];
     bottomIds?: string[];
   };
@@ -96,10 +98,7 @@ export class NonameCompatibleRuntime implements AuthoritativeGameRuntime {
                   type: "chooseSuit",
                   playerId: command.playerId,
                   suit: required(command.payload.suit, "suit") as
-                    | "spade"
-                    | "heart"
-                    | "club"
-                    | "diamond",
+                    "spade" | "heart" | "club" | "diamond",
                 }
               : command.action === "arrangeCards"
                 ? {
@@ -108,21 +107,24 @@ export class NonameCompatibleRuntime implements AuthoritativeGameRuntime {
                     topIds: command.payload.topIds ?? [],
                     bottomIds: command.payload.bottomIds ?? [],
                   }
-              : command.action === "activateSkill"
-                ? {
-                    type: "activateSkill",
-                    playerId: command.playerId,
-                    skillId: required(command.payload.skillId, "skillId"),
-                    cardIds: command.payload.cardIds,
-                    targetIds: command.payload.targetIds,
-                  }
-                : command.action === "discardCards"
+                : command.action === "activateSkill"
                   ? {
-                      type: "discardCards",
+                      type: "activateSkill",
                       playerId: command.playerId,
-                      cardIds: command.payload.cardIds ?? [],
+                      skillId: required(command.payload.skillId, "skillId"),
+                      cardIds: command.payload.cardIds,
+                      targetIds: command.payload.targetIds,
+                      optionId: command.payload.optionId,
+                      numberValue: command.payload.numberValue,
+                      suit: command.payload.suit,
                     }
-                  : { type: "endTurn", playerId: command.playerId };
+                  : command.action === "discardCards"
+                    ? {
+                        type: "discardCards",
+                        playerId: command.playerId,
+                        cardIds: command.payload.cardIds ?? [],
+                      }
+                    : { type: "endTurn", playerId: command.playerId };
     return this.requireGame().dispatch(engineCommand).map(toEvent);
   }
   async viewFor(playerId: string) {

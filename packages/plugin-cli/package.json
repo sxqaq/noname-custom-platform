@@ -16,10 +16,10 @@
     "@sgs/content-schema": "*",
     "@sgs/headless-engine": "*",
     "@sgs/script-sdk": "*",
+    "typescript": "^5.8.3",
     "tsx": "^4.19.4"
   },
   "devDependencies": {
-    "@types/node": "^22.15.30",
-    "typescript": "^5.8.3"
+    "@types/node": "^22.15.30"
   }
 }

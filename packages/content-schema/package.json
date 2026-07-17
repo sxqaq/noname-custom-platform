@@ -1,1 +1,19 @@
-{"name":"@sgs/content-schema","version":"0.1.0","type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"},"dependencies":{"@sgs/protocol":"*","@types/node":"^22.15.30"}}
+{
+  "name": "@sgs/content-schema",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@sgs/protocol": "*",
+    "@types/node": "^22.15.30"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4"
+  }
+}

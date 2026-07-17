@@ -33,4 +33,4 @@ npm.cmd run installer:win
 5. 主机正常关闭并释放端口；
 6. 静默卸载，确认安装目录中的程序文件被删除。
 
-本次本地产物 SHA-256：`080183851B904B3673AE431BF46586CE0FF2401CD421FEDE9BBA8D04FCBD0711`。未配置商业代码签名证书，因此公开下载时 Windows SmartScreen 仍可能提示未知发布者；正式分发应在发布工作流中注入项目自己的签名证书。
+2026-07-17 最近一次本地完整构建的 SHA-256：`83ED3DA5790989C6D43A9C5BDE0D31C46DD04AFD6C03B1A15AEF9EED28D040BD`。构建产物已在提交前从工作区清理，正式二进制由 GitHub 标签发布工作流重新生成并附加到 Release。未配置商业代码签名证书，因此公开下载时 Windows SmartScreen 仍可能提示未知发布者。
