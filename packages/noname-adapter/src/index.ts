@@ -6,6 +6,8 @@ import {
   type GameLog,
 } from "@sgs/headless-engine";
 
+export * from "./compat-realm.js";
+
 export interface GameCommand {
   playerId: string;
   requestId: string;
