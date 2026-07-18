@@ -28,6 +28,24 @@ test("隔离 Mod Worker 只接收结构化输入并使用确定性随机源", as
   assert.equal(first.fetchType, "undefined");
 });
 
+test("isolated Mod workers await bounded Promise results", async () => {
+  const result = await evaluateIsolatedMod<{ value: number }>({
+    source: `async (input) => ({ value: input.value + 1 })`,
+    input: { value: 41 },
+    seed: "async-worker",
+  });
+  assert.deepEqual(result, { value: 42 });
+
+  await assert.rejects(
+    evaluateIsolatedMod({
+      source: `() => new Promise(() => {})`,
+      seed: "unresolved-worker",
+      timeoutMs: 50,
+    }),
+    /强制终止/,
+  );
+});
+
 test("隔离 Mod Worker 禁止动态代码生成和系统时间", async () => {
   await assert.rejects(
     evaluateIsolatedMod({

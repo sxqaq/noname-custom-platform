@@ -35,6 +35,10 @@ interface RunningGame {
   roomName: string;
   createdAt: string;
   updatedAt: number;
+  pendingCoreCommand?: {
+    command: GameCommand;
+    beforeSequence: number;
+  };
 }
 interface CompatChoiceCommand {
   type: "compatChoice";
@@ -241,13 +245,33 @@ export class GameManager {
       .forEach((record) => compat.replay(record, game));
     this.replayRuleEvents(game, compat, hooks, undefined);
     running.commands.slice(0, count).forEach((command, commandIndex) => {
-      if (command.type !== "compatChoice") game.dispatch(command);
+      if (command.type === "compatChoice") {
+        this.replayCompatChoice(game, compat, hooks, commandIndex);
+        if (compat.pendingChoice()) return;
+        this.replayRuleEvents(game, compat, hooks, commandIndex);
+        hooks
+          .filter(
+            (record) =>
+              record.index >= compat.snapshot().nextHookIndex &&
+              record.commandIndex === commandIndex &&
+              record.hook !== "ruleEvent" &&
+              record.hook !== "choiceResponse",
+          )
+          .forEach((record) => compat.replay(record, game));
+        this.replayRuleEvents(game, compat, hooks, commandIndex);
+        return;
+      }
+      game.dispatch(command);
       this.replayRuleEvents(game, compat, hooks, commandIndex);
-      const commandHooks = hooks.filter(
-        (record) =>
-          record.commandIndex === commandIndex && record.hook !== "ruleEvent",
-      );
-      commandHooks.forEach((record) => compat.replay(record, game));
+      hooks
+        .filter(
+          (record) =>
+            record.index >= compat.snapshot().nextHookIndex &&
+            record.commandIndex === commandIndex &&
+            record.hook !== "ruleEvent" &&
+            record.hook !== "choiceResponse",
+        )
+        .forEach((record) => compat.replay(record, game));
       if (!compat.pendingChoice())
         this.replayRuleEvents(game, compat, hooks, commandIndex);
     });
@@ -266,11 +290,22 @@ export class GameManager {
   private async applyCommand(running: RunningGame, command: GameCommand) {
     const gameBefore = running.game.snapshot();
     const compatBefore = running.compat.snapshot();
+    const pendingCoreBefore = structuredClone(running.pendingCoreCommand);
     const commandIndex = running.commands.length;
     try {
       const beforeSequence = running.game.state.sequence;
       running.game.dispatch(command);
       await this.drainRuleEvents(running, commandIndex);
+      if (running.compat.pendingChoice()) {
+        running.pendingCoreCommand = {
+          command: structuredClone(command),
+          beforeSequence,
+        };
+        running.commands.push(command);
+        running.updatedAt = Date.now();
+        this.saveReplay(running);
+        return;
+      }
       const events = running.game.state.log.filter(
         (event) => event.sequence > beforeSequence,
       );
@@ -292,6 +327,7 @@ export class GameManager {
         running.config.compatSeed,
         compatBefore,
       );
+      running.pendingCoreCommand = pendingCoreBefore;
       throw error;
     }
   }
@@ -304,17 +340,35 @@ export class GameManager {
   ) {
     const gameBefore = running.game.snapshot();
     const compatBefore = running.compat.snapshot();
+    const pendingCoreBefore = structuredClone(running.pendingCoreCommand);
     const commandIndex = running.commands.length;
     const { action: _, ...choice } = response;
     try {
-      await running.compat.respond(
+      const resolution = await running.compat.respond(
         running.game,
         playerId,
         choice,
         commandIndex,
       );
-      if (!running.compat.pendingChoice())
+      if (resolution) running.game.resumeExternalRuleEvent(resolution);
+      if (!running.compat.pendingChoice()) {
         await this.drainRuleEvents(running, commandIndex);
+        if (!running.compat.pendingChoice() && running.pendingCoreCommand) {
+          const pendingCore = running.pendingCoreCommand;
+          const events = running.game.state.log.filter(
+            (event) => event.sequence > pendingCore.beforeSequence,
+          );
+          running.pendingCoreCommand = undefined;
+          await running.compat.run(
+            "afterCommand",
+            running.game,
+            commandIndex,
+            hookContext(pendingCore.command, events),
+          );
+          if (!running.compat.pendingChoice())
+            await this.drainRuleEvents(running, commandIndex);
+        }
+      }
       running.commands.push({
         type: "compatChoice",
         playerId,
@@ -329,6 +383,7 @@ export class GameManager {
         running.config.compatSeed,
         compatBefore,
       );
+      running.pendingCoreCommand = pendingCoreBefore;
       throw error;
     }
   }
@@ -358,6 +413,7 @@ export class GameManager {
         event,
         commandIndex,
       );
+      if (!resolution) return;
       running.game.resumeExternalRuleEvent(resolution);
     }
     throw new Error("单次命令触发的内部规则事件超过 256 个");
@@ -370,12 +426,14 @@ export class GameManager {
     commandIndex?: number,
   ) {
     for (let count = 0; count < MAX_INTERNAL_RULE_EVENTS_PER_COMMAND; count++) {
+      if (compat.pendingChoice()) return;
       const event = game.externalRuleEvent();
       if (!event) return;
       let data = structuredClone(event.data);
       let cancelled = false;
       const matching = records.filter(
         (record) =>
+          record.index >= compat.snapshot().nextHookIndex &&
           record.hook === "ruleEvent" &&
           record.commandIndex === commandIndex &&
           record.context.ruleEvent?.id === event.id,
@@ -390,10 +448,55 @@ export class GameManager {
         };
         if (record.output.ruleEvent?.cancelled !== undefined)
           cancelled = record.output.ruleEvent.cancelled;
+        if (record.output.request) return;
       }
       game.resumeExternalRuleEvent({ eventId: event.id, data, cancelled });
     }
     throw new Error("回放中的内部规则事件超过 256 个");
+  }
+
+  private replayCompatChoice(
+    game: HeadlessGame,
+    compat: NonameCompatRoomRuntime,
+    records: NonameCompatHookRecord[],
+    commandIndex: number,
+  ) {
+    const event = game.externalRuleEvent();
+    const choiceRecords = records.filter(
+      (record) =>
+        record.index >= compat.snapshot().nextHookIndex &&
+        record.commandIndex === commandIndex &&
+        record.hook === "choiceResponse",
+    );
+    for (const choiceRecord of choiceRecords) {
+      compat.replay(choiceRecord, game);
+      if (choiceRecord.output.request) return;
+      if (!event) continue;
+      let data = {
+        ...structuredClone(event.data),
+        ...structuredClone(choiceRecord.output.ruleEvent?.data ?? {}),
+      };
+      let cancelled =
+        choiceRecord.output.ruleEvent?.cancelled ??
+        event.data.cancelled === true;
+      const continued = records.filter(
+        (record) =>
+          record.index >= compat.snapshot().nextHookIndex &&
+          record.hook === "ruleEvent" &&
+          record.context.ruleEvent?.id === event.id,
+      );
+      for (const record of continued) {
+        compat.replay(record, game);
+        data = {
+          ...data,
+          ...structuredClone(record.output.ruleEvent?.data ?? {}),
+        };
+        if (record.output.ruleEvent?.cancelled !== undefined)
+          cancelled = record.output.ruleEvent.cancelled;
+        if (record.output.request) return;
+      }
+      game.resumeExternalRuleEvent({ eventId: event.id, data, cancelled });
+    }
   }
 }
 

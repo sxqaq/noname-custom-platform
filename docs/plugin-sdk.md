@@ -159,7 +159,23 @@ const runtime = defineNonameSkillRuntime([
 ]);
 ```
 
-运行时会按房间中实际持有该技能的武将匹配 `player/source/target/global` 触发角色。同步 `filter/content` 在隔离 Worker 内执行；`player.draw/recover/damage/loseHp/addMark/addSkill` 等调用转成结构化效果，`trigger.set/cancel/changeToZero` 及 `targets/directHit/excluded` 集合操作转成权威规则事件补丁。当前这一入口只支持同步触发技；需要 `chooseCard/chooseTarget` 的异步技能仍应使用高级运行时的宿主选择协议，后续会把它接入同一兼容入口。
+运行时会按房间中实际持有该技能的武将匹配 `player/source/target/global` 触发角色。同步或异步 `filter/content` 都在隔离 Worker 内执行；`player.draw/recover/damage/loseHp/addMark/addSkill` 等调用转成结构化效果，`trigger.set/cancel/changeToZero` 及 `targets/directHit/excluded` 集合操作转成权威规则事件补丁。
+
+异步内容可以直接使用 `await player.chooseBool()`、`chooseControl()`、`chooseTarget()`、`chooseCard()` 及 `.forResult()`。运行时不会序列化 JavaScript 调用栈，而是在选择点保存原始规则事件、确定性随机位置和已经确认的响应；收到外部输入后用同一输入从头重放到选择点，再继续余下逻辑。选择前产生的临时效果不会重复提交。
+
+```ts
+async content(_event, trigger, player) {
+  const result = await player
+    .chooseTarget({
+      prompt: "选择一个不结算的目标",
+      filterTarget(_card, owner, target) {
+        return owner.id !== target.id;
+      },
+    })
+    .forResult();
+  if (result.targets?.[0]) trigger.excluded.add(result.targets[0]);
+}
+```
 
 `runtimeOnly: true` 表示该技能由兼容运行时负责，核心 DSL 只保留技能 ID、名称和武将归属，不会再重复执行一遍空壳效果。`filter/content` 必须自包含，不能闭包引用文件里的局部变量；运行时提供确定性的 `Math.random`、`game`、`get`、`event/trigger/player` 代理。
 
@@ -185,7 +201,7 @@ if (
 
 无名杀兼容层的 `NonameEventBridge` 可直接记录 `trigger.targets/directHit/excluded` 的 `add`、`addArray`、`remove`、`removeArray`、`push`、`splice` 等集合修改；`authoritativePatch(eventId)` 会把这些写法转换成服务器接受的结构化事件补丁。
 
-事件变更需要 `game-state` 权限，会进入房主快照和基础回放。该钩子当前不允许请求玩家输入；为避免覆盖未完成的内部中断，伤害、失去体力、判定、弃牌和移牌效果也暂时拒绝。
+事件变更需要 `game-state` 权限，会进入房主快照和基础回放。规则事件现在允许发起上述有界玩家选择；等待期间核心事件保持暂停，其他扩展包在恢复后从正确顺序继续执行。为避免覆盖未完成的内部中断，伤害、失去体力、判定、弃牌和移牌效果仍暂时拒绝直接作为规则事件钩子的嵌套效果。
 
 ## SDK 能力
 

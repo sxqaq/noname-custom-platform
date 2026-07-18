@@ -112,6 +112,86 @@ test("Noname-style skills match their authoritative owner and patch the rule eve
   assert.equal(runtime.snapshot().records[0].hook, "ruleEvent");
 });
 
+test("Noname-style async rule choices survive snapshots and resume the event", async () => {
+  const current = game();
+  const source = current.state.players.find(
+    (player) => player.id === current.state.currentPlayerId,
+  )!;
+  const target = current.state.players.find(
+    (player) => player.id !== source.id,
+  )!;
+  source.general.skills.push("test.choose_excluded");
+  const pack = advancedPack();
+  pack.runtime = defineNonameSkillRuntime([
+    {
+      id: "test.choose_excluded",
+      trigger: { source: "useCard" },
+      async content(_event, trigger, player) {
+        const result = await player
+          .chooseTarget({
+            prompt: "选择一个不结算的目标",
+            filterTarget(
+              _card: unknown,
+              owner: { id: string },
+              candidate: { id: string },
+            ) {
+              return owner.id !== candidate.id;
+            },
+          })
+          .forResult();
+        if (result.targets?.[0]) trigger.excluded.add(result.targets[0]);
+      },
+    },
+  ]);
+  const runtime = new NonameCompatRoomRuntime([pack], "async-room-seed");
+  const event = {
+    id: "rule-async-choice",
+    name: "useCard" as const,
+    playerId: source.id,
+    data: {
+      cardId: "sha-1",
+      cardName: "sha",
+      sourceId: source.id,
+      targetIds: [target.id],
+      directHitTargetIds: [],
+      excludedTargetIds: [],
+    },
+  };
+
+  assert.equal(await runtime.runRuleEvent(current, event, 0), undefined);
+  const pending = runtime.pendingChoice()!;
+  assert.equal(pending.playerId, source.id);
+  assert.deepEqual(pending.selection.allowedTargetIds, [target.id]);
+
+  const restored = NonameCompatRoomRuntime.restore(
+    [pack],
+    "async-room-seed",
+    runtime.snapshot(),
+  );
+  await assert.rejects(
+    restored.respond(
+      current,
+      target.id,
+      { requestId: pending.requestId, targetIds: [target.id] },
+      1,
+    ),
+    /不属于当前玩家/,
+  );
+  const resolution = await restored.respond(
+    current,
+    source.id,
+    { requestId: pending.requestId, targetIds: [target.id] },
+    1,
+  );
+
+  assert.deepEqual(resolution?.data?.excludedTargetIds, [target.id]);
+  assert.equal(restored.pendingChoice(), undefined);
+  assert.equal(
+    restored.snapshot().records.at(-1)?.output.continuation,
+    undefined,
+  );
+});
+
 test("a real pinned upstream Yingzi function runs through the isolated room runtime", async () => {
   const module = await loadPinnedNonameSkillModule({
     upstreamRoot,
