@@ -241,12 +241,13 @@ export class GameManager {
     running.commands.slice(0, count).forEach((command, commandIndex) => {
       if (command.type !== "compatChoice") game.dispatch(command);
       this.replayRuleEvents(game, compat, hooks, commandIndex);
-      hooks
-        .filter(
-          (record) =>
-            record.commandIndex === commandIndex && record.hook !== "ruleEvent",
-        )
-        .forEach((record) => compat.replay(record, game));
+      const commandHooks = hooks.filter(
+        (record) =>
+          record.commandIndex === commandIndex && record.hook !== "ruleEvent",
+      );
+      commandHooks.forEach((record) => compat.replay(record, game));
+      if (!compat.pendingChoice())
+        this.replayRuleEvents(game, compat, hooks, commandIndex);
     });
     return {
       id,
@@ -277,6 +278,8 @@ export class GameManager {
         commandIndex,
         hookContext(command, events),
       );
+      if (!running.compat.pendingChoice())
+        await this.drainRuleEvents(running, commandIndex);
       running.commands.push(command);
       running.updatedAt = Date.now();
       this.saveReplay(running);

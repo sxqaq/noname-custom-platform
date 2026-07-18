@@ -151,6 +151,8 @@ if (
 }
 ```
 
+伤害事件按 `damageBegin1`、`damageBegin2`、`damageBegin3`、`damageBegin4`、`damageSource`、`damageEnd` 的稳定顺序进入同一个钩子。前四个事件允许修改 `data.num` 或设置 `cancelled`；伤害结算后的 `damageSource` 和 `damageEnd` 只读，不能追溯修改或取消已经扣除的体力。`data.sourceId`、`data.targetId` 和 `data.cardId` 提供权威上下文。
+
 事件变更需要 `game-state` 权限，会进入房主快照和回放。该钩子当前不允许请求玩家输入；为避免覆盖未完成的内部中断，伤害、失去体力、判定、弃牌和移牌效果也暂时拒绝。
 
 ## SDK 能力

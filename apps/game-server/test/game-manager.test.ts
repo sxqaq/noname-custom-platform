@@ -200,3 +200,59 @@ test("非法规则事件修改会原子回滚触发它的核心命令和 Mod 状
   );
   assert.deepEqual(manager.listReplays()[0], replayBefore);
 });
+
+test("afterCommand Mod 造成的伤害事件会被排空并无代码回放", async () => {
+  const manager = new GameManager();
+  const state = room();
+  const pack = runtimePack(`(input) => {
+    if (input.hook === "ruleEvent" && input.context.ruleEvent.name === "damageBegin3") {
+      return { ruleEvent: { data: { num: Number(input.context.ruleEvent.data.num) + 1 } } };
+    }
+    if (input.hook === "afterCommand" && input.game.phase === "play") {
+      return { effects: [{ type: "damage", target: "selected", targetPlayerId: "b", amount: 1 }] };
+    }
+    return {};
+  }`);
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  await manager.start(state, [pack]);
+
+  while (true) {
+    const pending = state.players
+      .map((player) => manager.view(state.id, player.id).pending)
+      .find((item) => item?.kind === "selectGeneral");
+    if (!pending || pending.kind !== "selectGeneral") break;
+    await manager.action(state.id, pending.playerId, {
+      action: "chooseGeneral",
+      generalId: pending.choices[0].id,
+    });
+  }
+
+  const view = manager.view(state.id, "a");
+  const target = view.players.find((player) => player.id === "b")!;
+  assert.equal(target.hp, target.maxHp - 2);
+  assert.equal(view.pending, undefined);
+  const replay = manager.listReplays()[0];
+  assert.deepEqual(
+    replay.compatHooks
+      ?.filter((record) => record.hook === "ruleEvent")
+      .map((record) => record.context.ruleEvent?.name),
+    [
+      "phaseDrawBegin2",
+      "damageBegin1",
+      "damageBegin2",
+      "damageBegin3",
+      "damageBegin4",
+      "damageSource",
+      "damageEnd",
+    ],
+  );
+  const replayed = manager.replay(replay.id, replay.commands.length);
+  assert.equal(replayed.view.sequence, view.sequence);
+  assert.equal(
+    replayed.view.players.find((player) => player.id === "b")?.hp,
+    target.hp,
+  );
+});
