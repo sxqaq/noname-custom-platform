@@ -402,3 +402,67 @@ test("Noname-style async choices suspend and deterministically resume", async ()
   });
   assert.deepEqual(completed.ruleEvent.data.excludedTargetIds, ["b"]);
 });
+
+test("Noname-style cost choices gate content like upstream skills", async () => {
+  const runtime = defineNonameSkillRuntime([
+    {
+      id: "custom.optional_draw",
+      trigger: { player: "phaseDrawBegin2" },
+      async cost(event, _trigger, player) {
+        event.result = await player
+          .chooseBool({ prompt: "Activate optional draw?" })
+          .forResult();
+      },
+      content(_event, trigger) {
+        trigger.num = (trigger.num ?? 0) + 1;
+      },
+    },
+  ]);
+  const input = {
+    hook: "ruleEvent",
+    context: {
+      ruleEvent: {
+        id: "rule-cost",
+        name: "phaseDrawBegin2",
+        playerId: "a",
+        data: { num: 2, numFixed: false },
+      },
+    },
+    game: {
+      players: [
+        {
+          id: "a",
+          name: "Author",
+          hp: 4,
+          maxHp: 4,
+          alive: true,
+          hand: [],
+          equipment: {},
+          judgment: [],
+          marks: {},
+          grantedSkills: {},
+          general: { skills: ["custom.optional_draw"] },
+        },
+      ],
+    },
+  };
+  const suspended = await evaluateIsolatedMod<{
+    state: Record<string, unknown>;
+    request: { selection: { kind: string } };
+  }>({ source: runtime.source, seed: "cost-seed", input });
+  assert.equal(suspended.request.selection.kind, "option");
+
+  const declined = await evaluateIsolatedMod<{
+    ruleEvent: { data: { num: number } };
+  }>({
+    source: runtime.source,
+    seed: "cost-seed",
+    input: {
+      ...input,
+      hook: "choiceResponse",
+      state: suspended.state,
+      context: { choice: { optionId: "no" } },
+    },
+  });
+  assert.equal(declined.ruleEvent.data.num, 2);
+});

@@ -166,7 +166,7 @@ node scripts/e2e-smoke.mjs
 node scripts/e2e-content.mjs
 ```
 
-当前验收结果：208 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、异步玩家选择、断线恢复和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，连续复验的确定性摘要为 `b8a2a291…f482c`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
+当前验收结果：210 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、异步玩家选择、断线恢复和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，连续复验的确定性摘要为 `b8a2a291…f482c`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
 
 ## 安全与数据说明
 

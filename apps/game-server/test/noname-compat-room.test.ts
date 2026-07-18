@@ -237,6 +237,63 @@ test("a real pinned upstream Yingzi function runs through the isolated room runt
   }
 });
 
+test("a real pinned upstream skill cost pauses for its target then runs content", async () => {
+  const module = await loadPinnedNonameSkillModule({
+    upstreamRoot,
+    pack: "standard",
+    seed: "isolated-upstream-shushen",
+  });
+  try {
+    const upstream = module.skills.stdshushen;
+    assert.ok(upstream.cost);
+    assert.ok(upstream.content);
+    const current = game();
+    const owner = current.state.players.find(
+      (player) => player.id === current.state.currentPlayerId,
+    )!;
+    const target = current.state.players.find(
+      (player) => player.id !== owner.id,
+    )!;
+    owner.general.skills.push("stdshushen");
+    const pack = advancedPack();
+    pack.runtime = defineNonameSkillRuntime([
+      {
+        id: "stdshushen",
+        trigger: { player: "phaseDrawBegin2" },
+        cost: upstream.cost as never,
+        content: upstream.content as never,
+      },
+    ]);
+    const runtime = new NonameCompatRoomRuntime(
+      [pack],
+      "isolated-upstream-cost-room",
+    );
+    const event = {
+      id: "rule-upstream-shushen-cost",
+      name: "phaseDrawBegin2" as const,
+      playerId: owner.id,
+      data: { num: 2, numFixed: false },
+    };
+    const before = target.hand.length;
+
+    assert.equal(await runtime.runRuleEvent(current, event, 0), undefined);
+    const pending = runtime.pendingChoice()!;
+    assert.deepEqual(pending.selection.allowedTargetIds, [target.id]);
+    const resolution = await runtime.respond(
+      current,
+      owner.id,
+      { requestId: pending.requestId, targetIds: [target.id] },
+      1,
+    );
+
+    assert.equal(runtime.pendingChoice(), undefined);
+    assert.equal(target.hand.length, before + 1);
+    assert.equal(resolution?.data?.num, 2);
+  } finally {
+    module.dispose();
+  }
+});
+
 test("兼容钩子记录可在不重新执行作者代码时确定性回放", async () => {
   const original = game();
   const runtime = new NonameCompatRoomRuntime([advancedPack()], "room-seed");
