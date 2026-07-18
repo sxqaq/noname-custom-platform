@@ -5,8 +5,9 @@
 ## 当前审计结果
 
 - 26 个官方武将技能包全部可在无 DOM Node.js 环境完成声明加载，包括带额外导入的 `offline` 和 `xianding`。
-- 共发现 604 种调用形式：13 种 `direct`、53 种 `shimmed`、41 种 `migrated`、497 种尚未映射。
-- 按静态调用次数计，85,852 次中有 52,729 次已分类为 `direct`/`shimmed`/`migrated`，33,123 次仍未映射。这是 API 覆盖率，不是技能可玩率。
+- 共发现 612 种调用形式：13 种 `direct`、61 种 `shimmed`、41 种 `migrated`、497 种尚未映射。
+- 按静态调用次数计，86,139 次中有 53,016 次已分类为 `direct`/`shimmed`/`migrated`，33,123 次仍未映射。这是 API 覆盖率，不是技能可玩率。
+- 其中 287 次为 `trigger.targets/directHit/excluded` 的集合修改；这些调用现在会被兼容桥转换成可校验的权威事件补丁。
 - `standard.fanjian` 已完成真实异步选择、检查点恢复和确定性回放；`standard.kurou` 已通过权威效果桥原子执行；`standard.luoyi` 已验证临时技能效果；`standard.yingzi` 已验证可序列化事件修改日志。“可加载”仍不自动等于“可完整执行”。
 
 状态含义：
@@ -25,9 +26,9 @@
 - `NonameEffectBridge` 从权威 `GameState` 生成受限玩家代理，将体力、摸牌、伤害、标记、技能和跳阶段操作转换为结构化效果。
 - 效果可用 `targetPlayerId`/`toPlayerId` 指定任意存活玩家，整批效果由引擎原子应用；无效 ID 会回滚状态与随机源。
 - `NonameInteractionHost` 支持 16 类选择、`.set(...)` 链、直接 `await`、检查点和无代码回放。
-- `NonameEventBridge` 将父事件、触发事件、失牌/得牌/弃牌记录以及 `set/cancel/finish/goto` 保存为有界变更日志。
+- `NonameEventBridge` 将父事件、触发事件、失牌/得牌/弃牌记录以及 `set/cancel/finish/goto`、`targets/directHit/excluded` 集合操作保存为有界变更日志，并可输出权威规则事件补丁。
 
-`phaseDrawBegin2`、三段用牌主链和六段伤害主链已接入真实引擎中断，但事件变更日志还没有接入逐目标用牌、濒死、判定和其余阶段中断点；扩展区和完整历史模型也尚未完成，因此不宣称上游技能已全量可玩。
+`phaseDrawBegin2`、三段用牌主链、逐目标用牌事件、`directHit/excluded` 和六段伤害主链已接入真实引擎中断，但事件变更日志还没有接入濒死、判定和其余阶段中断点；扩展区和完整历史模型也尚未完成，因此不宣称上游技能已全量可玩。
 
 ## 可复现命令
 

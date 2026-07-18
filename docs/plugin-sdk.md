@@ -153,7 +153,9 @@ if (
 
 伤害事件按 `damageBegin1`、`damageBegin2`、`damageBegin3`、`damageBegin4`、`damageSource`、`damageEnd` 的稳定顺序进入同一个钩子。前四个事件允许修改 `data.num` 或设置 `cancelled`；伤害结算后的 `damageSource` 和 `damageEnd` 只读，不能追溯修改或取消已经扣除的体力。`data.sourceId`、`data.targetId` 和 `data.cardId` 提供权威上下文。
 
-用牌主链按 `useCard`、`useCard1`、`useCard2` 顺序执行。作者可以修改 `data.cardName` 实现视为其他牌，或替换 `data.targetIds` 来增加、移除、重排目标；每一项修改都会重新经过权威引擎的牌定义、距离、目标数量、武将技能和状态校验。`data.cardId` 与 `data.sourceId` 是不可伪造的物理牌和来源身份。任一阶段设置 `cancelled` 会终止结算并把已经使用的物理牌放入弃牌堆。
+用牌主链按 `useCard`、`useCard1`、`useCard2` 顺序执行，随后为每个目标依次产生 `useCardToTarget`、`useCardToPlayered`、`useCardToTargeted`。作者可以修改 `data.cardName` 实现视为其他牌，或替换 `data.targetIds` 来增加、移除、重排目标；`data.directHitTargetIds` 使指定目标不能响应，`data.excludedTargetIds` 让指定目标跳过效果。逐目标事件同时提供 `targetId` 和 `targetIndex`。这些集合贯通杀、普通及群体锦囊、多目标续点和无懈响应，每一项修改都会重新经过权威引擎的牌定义、距离、目标数量、武将技能和状态校验。`data.cardId` 与 `data.sourceId` 是不可伪造的物理牌和来源身份。任一阶段设置 `cancelled` 会终止结算并把已经使用的物理牌放入弃牌堆。
+
+无名杀兼容层的 `NonameEventBridge` 可直接记录 `trigger.targets/directHit/excluded` 的 `add`、`addArray`、`remove`、`removeArray`、`push`、`splice` 等集合修改；`authoritativePatch(eventId)` 会把这些写法转换成服务器接受的结构化事件补丁。
 
 事件变更需要 `game-state` 权限，会进入房主快照和基础回放。该钩子当前不允许请求玩家输入；为避免覆盖未完成的内部中断，伤害、失去体力、判定、弃牌和移牌效果也暂时拒绝。
 

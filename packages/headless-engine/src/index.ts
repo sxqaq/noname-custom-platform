@@ -180,7 +180,13 @@ export type DamageRuleEventName =
   | "damageBegin4"
   | "damageSource"
   | "damageEnd";
-export type UseCardRuleEventName = "useCard" | "useCard1" | "useCard2";
+export type UseCardRuleEventName =
+  | "useCard"
+  | "useCard1"
+  | "useCard2"
+  | "useCardToTarget"
+  | "useCardToPlayered"
+  | "useCardToTargeted";
 export type ExternalRuleEventName =
   "phaseDrawBegin2" | DamageRuleEventName | UseCardRuleEventName;
 export interface ExternalRuleEvent {
@@ -216,6 +222,12 @@ export interface TrickResolution {
   groupKind?: "nanman" | "wanjian" | "taoyuan" | "wugu";
   remainingTargetIds?: string[];
   groupCards?: Card[];
+  directHitTargetIds?: string[];
+  excludedTargetIds?: string[];
+}
+export interface CardUseOptions {
+  directHitTargetIds?: string[];
+  excludedTargetIds?: string[];
 }
 export type JudgmentContext =
   | { kind: "delayed"; ownerId: string; delayed: Card }
@@ -239,6 +251,7 @@ export type JudgmentContext =
       card: Card;
       remainingTargetIds: string[];
       resumePhase: "play";
+      directHitTargetIds?: string[];
     }
   | { kind: "luoshen"; ownerId: string }
   | {
@@ -272,6 +285,7 @@ export type PendingResponse =
       required?: number;
       answered?: number;
       remainingTargetIds?: string[];
+      directHitTargetIds?: string[];
     }
   | {
       playerId: string;
@@ -281,6 +295,7 @@ export type PendingResponse =
       card: Card;
       remainingTargetIds: string[];
       resumePhase: "play";
+      directHitTargetIds?: string[];
     }
   | {
       playerId: string;
@@ -331,6 +346,8 @@ export type PendingResponse =
       card?: Card;
       cardName?: string;
       remainingTargetIds?: string[];
+      directHitTargetIds?: string[];
+      excludedTargetIds?: string[];
     }
   | {
       playerId: string;
@@ -419,6 +436,7 @@ export type PendingResponse =
       targetIds: string[];
       remainingTargetIds?: string[];
       resumePhase: "play";
+      directHitTargetIds?: string[];
     }
   | {
       playerId: string;
@@ -450,6 +468,9 @@ export type PendingResponse =
             command: Extract<GameCommand, { type: "useCard" }>;
             effectiveName: string;
             suppressLianying: boolean;
+            directHitTargetIds: string[];
+            excludedTargetIds: string[];
+            targetIndex?: number;
           };
     }
   | {
@@ -527,6 +548,7 @@ export type PendingResponse =
       required: number;
       answered: number;
       remainingTargetIds?: string[];
+      directHitTargetIds?: string[];
       resumePhase: "play";
     }
   | {
@@ -1539,6 +1561,7 @@ export class HeadlessGame {
     command: Extract<GameCommand, { type: "useCard" }>,
     effectiveName?: string,
     resumeRuleEvent = false,
+    options: CardUseOptions = {},
   ) {
     if (this.state.externalRuleEvents && !resumeRuleEvent) {
       const player = this.requireTurn(command.playerId);
@@ -1550,12 +1573,19 @@ export class HeadlessGame {
       if (!definition) throw new Error("卡牌定义不存在");
       if (cardName === "shan" || cardName === "wuxie")
         throw new Error(`${definition.name}只能用于响应`);
+      const normalizedCommand = {
+        ...structuredClone(command),
+        targetId: undefined,
+        targetIds: this.defaultUseCardTargetIds(command, cardName, definition),
+      };
       this.queueUseCardRuleEvent("useCard", {
         kind: "useCard",
         stage: "useCard",
-        command: structuredClone(command),
+        command: normalizedCommand,
         effectiveName: cardName,
         suppressLianying: this.suppressLianying.has(command.cardId),
+        directHitTargetIds: [],
+        excludedTargetIds: [],
       });
       return;
     }
@@ -1636,12 +1666,20 @@ export class HeadlessGame {
       }
       this.state.shaUsed = true;
       this.state.discard.push(card);
+      const resolvingTargets = targets.filter(
+        (target) => !options.excludedTargetIds?.includes(target.id),
+      );
+      if (!resolvingTargets.length) {
+        this.log("card.sha.excluded", `${player.name}使用的杀没有有效目标`);
+        return;
+      }
       this.beginShaTarget(
         player,
-        targets[0],
+        resolvingTargets[0],
         card,
-        targets.slice(1).map((item) => item.id),
+        resolvingTargets.slice(1).map((item) => item.id),
         "play",
+        options.directHitTargetIds,
       );
       this.log("card.sha", `${player.name}使用了杀`);
       this.trigger("afterUseSha", player);
@@ -1652,7 +1690,10 @@ export class HeadlessGame {
       throw new Error(`${definition.name}只能用于响应`);
     }
     const targetIds =
-      command.targetIds ?? (command.targetId ? [command.targetId] : []);
+      command.targetIds ??
+      (command.targetId
+        ? [command.targetId]
+        : this.defaultUseCardTargetIds(command, cardName, definition));
     const selected =
       definition.target === "self"
         ? player
@@ -1677,7 +1718,15 @@ export class HeadlessGame {
       throw new Error("体力已满，不能使用桃");
     }
     if (definition.type === "trick") {
-      this.playTrick(card, cardName, definition, player, selected, targetIds);
+      this.playTrick(
+        card,
+        cardName,
+        definition,
+        player,
+        selected,
+        targetIds,
+        options,
+      );
       return;
     }
     if (definition.subtype === "delayed") {
@@ -1839,6 +1888,14 @@ export class HeadlessGame {
         cardName: continuation.effectiveName,
         sourceId: continuation.command.playerId,
         targetIds: [...targetIds],
+        directHitTargetIds: [...continuation.directHitTargetIds],
+        excludedTargetIds: [...continuation.excludedTargetIds],
+        ...(continuation.targetIndex === undefined
+          ? {}
+          : {
+              targetId: targetIds[continuation.targetIndex],
+              targetIndex: continuation.targetIndex,
+            }),
       },
     };
     this.state.pending = {
@@ -1891,6 +1948,14 @@ export class HeadlessGame {
       targetId: undefined,
       targetIds: rawTargets as string[],
     };
+    const directHitTargetIds = this.ruleEventPlayerIds(
+      data?.directHitTargetIds ?? continuation.directHitTargetIds,
+      "directHitTargetIds",
+    );
+    const excludedTargetIds = this.ruleEventPlayerIds(
+      data?.excludedTargetIds ?? continuation.excludedTargetIds,
+      "excludedTargetIds",
+    );
     if (cancelled) {
       const source = this.requireTurn(command.playerId);
       if (continuation.suppressLianying)
@@ -1905,28 +1970,81 @@ export class HeadlessGame {
       }
       return;
     }
-    const next =
-      continuation.stage === "useCard"
-        ? "useCard1"
-        : continuation.stage === "useCard1"
-          ? "useCard2"
-          : undefined;
+    let next: UseCardRuleEventName | undefined;
+    let targetIndex = continuation.targetIndex;
+    if (continuation.stage === "useCard") next = "useCard1";
+    else if (continuation.stage === "useCard1") next = "useCard2";
+    else if (continuation.stage === "useCard2" && command.targetIds.length) {
+      next = "useCardToTarget";
+      targetIndex = 0;
+    } else if (continuation.stage === "useCardToTarget")
+      next = "useCardToPlayered";
+    else if (continuation.stage === "useCardToPlayered")
+      next = "useCardToTargeted";
+    else if (
+      continuation.stage === "useCardToTargeted" &&
+      (targetIndex ?? -1) + 1 < command.targetIds.length
+    ) {
+      next = "useCardToTarget";
+      targetIndex = (targetIndex ?? -1) + 1;
+    }
     if (next) {
       this.queueUseCardRuleEvent(next, {
         ...continuation,
         command,
         effectiveName: cardName,
+        directHitTargetIds,
+        excludedTargetIds,
+        targetIndex,
       });
       return;
     }
     if (continuation.suppressLianying)
       this.suppressLianying.add(command.cardId);
     try {
-      this.useCard(command, cardName, true);
+      this.useCard(command, cardName, true, {
+        directHitTargetIds,
+        excludedTargetIds,
+      });
     } finally {
       if (continuation.suppressLianying)
         this.suppressLianying.delete(command.cardId);
     }
+  }
+  private defaultUseCardTargetIds(
+    command: Extract<GameCommand, { type: "useCard" }>,
+    cardName: string,
+    definition: CardDefinition,
+  ) {
+    if (command.targetIds?.length) return [...command.targetIds];
+    if (command.targetId) return [command.targetId];
+    if (cardName === "nanman" || cardName === "wanjian")
+      return this.aliveAfter(command.playerId).filter(
+        (playerId) => playerId !== command.playerId,
+      );
+    if (cardName === "taoyuan" || cardName === "wugu")
+      return [
+        command.playerId,
+        ...this.aliveAfter(command.playerId).filter(
+          (playerId) => playerId !== command.playerId,
+        ),
+      ];
+    return definition.target === "self" ? [command.playerId] : [];
+  }
+  private ruleEventPlayerIds(value: unknown, field: string) {
+    if (
+      !Array.isArray(value) ||
+      value.length > 8 ||
+      value.some(
+        (playerId) =>
+          typeof playerId !== "string" ||
+          !playerId.length ||
+          !this.player(playerId, false),
+      ) ||
+      new Set(value).size !== value.length
+    )
+      throw new Error(`Rule event ${field} must contain unique player IDs`);
+    return value as string[];
   }
   private beginShaTarget(
     player: PlayerState,
@@ -1934,6 +2052,7 @@ export class HeadlessGame {
     card: Card,
     remainingTargetIds: string[],
     resumePhase: "play",
+    directHitTargetIds: string[] = [],
   ) {
     const liuliTargets = this.state.players.filter(
       (item) =>
@@ -1958,11 +2077,20 @@ export class HeadlessGame {
         targetIds: liuliTargets.map((item) => item.id),
         remainingTargetIds,
         resumePhase,
+        directHitTargetIds,
       };
       this.log("skill.liuli.wait", `${target.name}可以发动流离转移杀`);
       return;
     }
-    this.beginShaDefense(player, target, card, remainingTargetIds, resumePhase);
+    this.beginShaDefense(
+      player,
+      target,
+      card,
+      remainingTargetIds,
+      resumePhase,
+      false,
+      directHitTargetIds,
+    );
   }
   private beginShaDefense(
     player: PlayerState,
@@ -1971,6 +2099,7 @@ export class HeadlessGame {
     remainingTargetIds: string[],
     resumePhase: "play",
     skipTieji = false,
+    directHitTargetIds: string[] = [],
   ) {
     if (
       target.equipment.armor?.name === "renwang" &&
@@ -1983,8 +2112,22 @@ export class HeadlessGame {
         remainingTargetIds,
         resumePhase,
         card,
+        directHitTargetIds,
       );
       this.resumeState(next, resumePhase);
+      return;
+    }
+    if (directHitTargetIds.includes(target.id)) {
+      this.resolveMissedShan({
+        playerId: target.id,
+        kind: "shan",
+        sourceId: player.id,
+        cardId: card.id,
+        card,
+        resumePhase,
+        remainingTargetIds,
+        directHitTargetIds,
+      });
       return;
     }
     if (!skipTieji && player.general.skills.includes("tieji")) {
@@ -2001,6 +2144,7 @@ export class HeadlessGame {
           card,
           remainingTargetIds,
           resumePhase,
+          directHitTargetIds,
         },
       };
       return;
@@ -2016,6 +2160,7 @@ export class HeadlessGame {
       required: player.general.skills.includes("wushuang") ? 2 : 1,
       answered: 0,
       remainingTargetIds,
+      directHitTargetIds,
     };
     if (
       player.equipment.weapon?.name === "cixiong" &&
@@ -2040,6 +2185,7 @@ export class HeadlessGame {
     source: PlayerState,
     selected: PlayerState,
     targetIds: string[],
+    options: CardUseOptions,
   ) {
     if (
       definition.subtype === "delayed" &&
@@ -2089,13 +2235,20 @@ export class HeadlessGame {
     const groupKind = (["nanman", "wanjian", "taoyuan", "wugu"] as const).find(
       (name) => name === cardName,
     );
+    const excluded = new Set(options.excludedTargetIds ?? []);
     const groupTargets = groupKind
-      ? groupKind === "taoyuan" || groupKind === "wugu"
-        ? [
-            source.id,
-            ...this.aliveAfter(source.id).filter((id) => id !== source.id),
-          ]
-        : this.aliveAfter(source.id).filter((id) => id !== source.id)
+      ? targetIds
+          .filter((id) => !excluded.has(id))
+          .map(
+            (id) =>
+              this.validTarget(
+                source,
+                id,
+                groupKind === "nanman" || groupKind === "wanjian"
+                  ? "other"
+                  : "any",
+              ).id,
+          )
       : undefined;
     const groupCards: Card[] | undefined =
       groupKind === "wugu"
@@ -2107,21 +2260,39 @@ export class HeadlessGame {
       card,
       cardName,
       sourceId: source.id,
-      targetIds: groupTargets?.length
-        ? [groupTargets[0]]
-        : targetIds.length
-          ? targetIds
-          : [selected.id],
+      targetIds:
+        groupTargets !== undefined
+          ? groupTargets.length
+            ? [groupTargets[0]]
+            : []
+          : (targetIds.length ? targetIds : [selected.id]).filter(
+              (id) => !excluded.has(id),
+            ),
       groupKind,
       remainingTargetIds: groupTargets?.slice(1),
       groupCards,
+      directHitTargetIds: options.directHitTargetIds,
+      excludedTargetIds: options.excludedTargetIds,
     };
+    if (!resolution.targetIds.length) {
+      this.state.phase = "play";
+      this.log("card.trick.excluded", `${source.name}使用的锦囊没有有效目标`);
+      return;
+    }
     this.beginTrickResolution(resolution);
   }
   private beginTrickResolution(resolution: TrickResolution) {
     const source = this.player(resolution.sourceId, false);
     if (!source?.alive) {
       this.state.phase = "play";
+      return;
+    }
+    if (
+      resolution.targetIds.some((targetId) =>
+        resolution.directHitTargetIds?.includes(targetId),
+      )
+    ) {
+      this.resolveTrick(resolution);
       return;
     }
     const responders = [
@@ -2205,6 +2376,8 @@ export class HeadlessGame {
         card,
         cardName,
         remainingTargetIds: resolution.remainingTargetIds,
+        directHitTargetIds: resolution.directHitTargetIds,
+        excludedTargetIds: resolution.excludedTargetIds,
       };
       this.log("card.wugu", `${selected.name}从五谷丰登展示牌中选择一张`);
       return;
@@ -2218,6 +2391,17 @@ export class HeadlessGame {
       resolution.groupKind === "nanman" ||
       resolution.groupKind === "wanjian"
     ) {
+      if (resolution.directHitTargetIds?.includes(selected.id)) {
+        this.damage(
+          source,
+          selected,
+          1,
+          "play",
+          this.nextTrickPending(resolution),
+          card.id,
+        );
+        return;
+      }
       this.state.phase = "response";
       this.state.pending = {
         playerId: selected.id,
@@ -2472,6 +2656,8 @@ export class HeadlessGame {
         pending.card,
         pending.remainingTargetIds ?? [],
         pending.resumePhase,
+        false,
+        pending.directHitTargetIds,
       );
       return;
     }
@@ -2894,6 +3080,8 @@ export class HeadlessGame {
         pending.card,
         pending.remainingTargetIds ?? [],
         pending.resumePhase,
+        false,
+        pending.directHitTargetIds,
       );
       return;
     }
@@ -2966,6 +3154,7 @@ export class HeadlessGame {
         pending.resumePhase,
         pending.remainingTargetIds,
         pending.card ?? this.findPhysicalCard(pending.cardId),
+        pending.directHitTargetIds,
       );
     } else {
       if (this.hasSkill(target, "hujia")) {
@@ -2985,6 +3174,7 @@ export class HeadlessGame {
             required: pending.required ?? 1,
             answered: pending.answered ?? 0,
             remainingTargetIds: pending.remainingTargetIds,
+            directHitTargetIds: pending.directHitTargetIds,
             resumePhase: pending.resumePhase,
           };
           this.log(
@@ -3020,6 +3210,7 @@ export class HeadlessGame {
           pending.remainingTargetIds,
           pending.resumePhase,
           pending.card ?? this.findPhysicalCard(pending.cardId),
+          pending.directHitTargetIds,
         ),
         pending.resumePhase,
       );
@@ -3062,6 +3253,7 @@ export class HeadlessGame {
         pending.remainingTargetIds,
         pending.resumePhase,
         pending.card ?? this.findPhysicalCard(pending.cardId),
+        pending.directHitTargetIds,
       ),
       pending.resumePhase,
     );
@@ -3096,12 +3288,14 @@ export class HeadlessGame {
     resumePhase: "play",
     remainingTargetIds?: string[],
     card?: Card,
+    directHitTargetIds?: string[],
   ) {
     const next = this.nextShaPending(
       source,
       remainingTargetIds,
       resumePhase,
       card ?? this.findPhysicalCard("fangtian"),
+      directHitTargetIds,
     );
     if (next) {
       this.log(
@@ -3159,6 +3353,7 @@ export class HeadlessGame {
     remainingTargetIds: string[] | undefined,
     resumePhase: "play",
     card: Card,
+    directHitTargetIds: string[] = [],
   ) {
     const remaining = [...(remainingTargetIds ?? [])];
     while (remaining.length) {
@@ -3172,6 +3367,7 @@ export class HeadlessGame {
         card,
         resumePhase,
         remainingTargetIds: remaining,
+        directHitTargetIds,
       };
     }
     return undefined;
@@ -3339,6 +3535,8 @@ export class HeadlessGame {
         groupKind: "wugu",
         remainingTargetIds: pending.remainingTargetIds,
         groupCards: pending.cards,
+        directHitTargetIds: pending.directHitTargetIds,
+        excludedTargetIds: pending.excludedTargetIds,
       });
       return;
     }
@@ -3514,6 +3712,7 @@ export class HeadlessGame {
           pending.resumePhase,
           pending.remainingTargetIds,
           pending.card ?? this.findPhysicalCard(pending.cardId),
+          pending.directHitTargetIds,
         );
         return;
       }
@@ -3538,6 +3737,7 @@ export class HeadlessGame {
       required: pending.required,
       answered: pending.answered,
       remainingTargetIds: pending.remainingTargetIds,
+      directHitTargetIds: pending.directHitTargetIds,
       resumePhase: pending.resumePhase,
     };
     if (
@@ -4435,6 +4635,7 @@ export class HeadlessGame {
           pending.card,
           pending.remainingTargetIds,
           pending.resumePhase,
+          pending.directHitTargetIds,
         );
         return;
       }
@@ -4445,6 +4646,7 @@ export class HeadlessGame {
               pending.remainingTargetIds,
               pending.resumePhase,
               pending.card,
+              pending.directHitTargetIds,
             )
           : undefined,
         pending.resumePhase,
@@ -4474,6 +4676,7 @@ export class HeadlessGame {
         context.remainingTargetIds,
         context.resumePhase,
         true,
+        context.directHitTargetIds,
       );
       return;
     }
@@ -4641,6 +4844,7 @@ export class HeadlessGame {
             context.remainingTargetIds,
             context.resumePhase,
             context.card,
+            context.directHitTargetIds,
           ),
           context.card.id,
         );
@@ -4652,6 +4856,7 @@ export class HeadlessGame {
           context.remainingTargetIds,
           context.resumePhase,
           true,
+          context.directHitTargetIds,
         );
       return;
     }
@@ -4666,6 +4871,7 @@ export class HeadlessGame {
           pending.resumePhase,
           pending.remainingTargetIds,
           pending.card ?? this.findPhysicalCard(pending.cardId),
+          pending.directHitTargetIds,
         );
       else this.resolveMissedShan(pending);
       return;

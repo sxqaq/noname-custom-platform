@@ -192,3 +192,27 @@ test("SDK exposes typed use-card retargeting and view-as patches", () => {
   assert.match(runtime.source, /useCard2/);
   assert.match(runtime.source, /targetIds/);
 });
+
+test("SDK types per-target directHit and excluded collections", () => {
+  const runtime = defineRuntime((input) => {
+    const event = input.context.ruleEvent;
+    if (
+      input.hook === "ruleEvent" &&
+      event?.name === "useCardToTarget" &&
+      event.data.targetId
+    ) {
+      return {
+        ruleEvent: {
+          data: {
+            directHitTargetIds: [event.data.targetId],
+            excludedTargetIds: event.data.excludedTargetIds,
+          },
+        },
+      };
+    }
+    return {};
+  });
+
+  assert.match(runtime.source, /useCardToTarget/);
+  assert.match(runtime.source, /directHitTargetIds/);
+});

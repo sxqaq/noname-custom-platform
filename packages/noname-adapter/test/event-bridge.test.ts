@@ -72,6 +72,9 @@ test("real upstream yingzi mutates a serializable trigger journal", async () => 
   }
 
   assert.equal(trigger.num, 3);
+  assert.deepEqual(bridge.authoritativePatch("draw-1"), {
+    data: { num: 3, numFixed: false },
+  });
   assert.deepEqual(bridge.mutations(), [
     { eventId: "draw-1", op: "set", key: "num", value: 3 },
   ]);
@@ -99,6 +102,46 @@ test("event cancellation, finish and goto are explicit bounded mutations", () =>
     { eventId: "skill-1", op: "finish" },
     { eventId: "skill-1", op: "goto", step: 2 },
   ]);
+});
+
+test("Noname target collections journal add/remove/directHit/excluded mutations", () => {
+  const players = new Map(
+    ["a", "b", "c"].map((id) => [id, { id, playerid: id }]),
+  );
+  const bridge = new NonameEventBridge({
+    events: [
+      {
+        id: "use-1",
+        name: "useCard2",
+        playerId: "a",
+        data: { targets: ["a"], directHit: [], excluded: [] },
+      },
+    ],
+    resolvePlayer: (playerId) => players.get(playerId),
+  });
+  const trigger = bridge.event("use-1");
+
+  trigger.targets.add(players.get("b")).add(players.get("a"));
+  trigger.targets.remove(players.get("a"));
+  trigger.directHit.addArray([players.get("a"), players.get("b")]);
+  trigger.excluded.push(players.get("c"));
+
+  const data = bridge.snapshot().events[0].data!;
+  assert.deepEqual(data.targets, ["b"]);
+  assert.deepEqual(data.directHit, ["a", "b"]);
+  assert.deepEqual(data.excluded, ["c"]);
+  assert.equal(trigger.targets.includes(players.get("b")), true);
+  assert.deepEqual(bridge.authoritativePatch("use-1"), {
+    data: {
+      targetIds: ["b"],
+      directHitTargetIds: ["a", "b"],
+      excludedTargetIds: ["c"],
+    },
+  });
+  assert.equal(
+    bridge.mutations().filter((mutation) => mutation.op === "set").length,
+    4,
+  );
 });
 
 test("event graph rejects dangling links and parent cycles", () => {
