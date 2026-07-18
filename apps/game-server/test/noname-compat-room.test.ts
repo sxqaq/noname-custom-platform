@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { HeadlessGame } from "@sgs/headless-engine";
+import { loadPinnedNonameSkillModule } from "@sgs/noname-adapter";
 import type { ExtensionPackageDto } from "@sgs/protocol";
+import { defineNonameSkillRuntime } from "../../../packages/script-sdk/src/index.js";
 import { NonameCompatRoomRuntime } from "../src/noname-compat-room.js";
 
 const advancedPack = (): ExtensionPackageDto => ({
@@ -32,6 +36,11 @@ const advancedPack = (): ExtensionPackageDto => ({
   },
 });
 
+const upstreamRoot = resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "../../../vendor/noname",
+);
+
 function game() {
   return HeadlessGame.create({
     seed: 7,
@@ -57,6 +66,95 @@ test("高级扩展钩子在隔离 Worker 后由权威引擎应用", async () => 
   assert.deepEqual(runtime.snapshot().states["test.authoritative_mod"], {
     calls: 2,
   });
+});
+
+test("Noname-style skills match their authoritative owner and patch the rule event", async () => {
+  const current = game();
+  const source = current.state.players.find(
+    (player) => player.id === current.state.currentPlayerId,
+  )!;
+  const target = current.state.players.find(
+    (player) => player.id !== source.id,
+  )!;
+  source.general.skills.push("test.noname_direct_hit");
+  const pack = advancedPack();
+  pack.runtime = defineNonameSkillRuntime([
+    {
+      id: "test.noname_direct_hit",
+      trigger: { source: "useCardToTarget" },
+      content(_event, trigger, player) {
+        if (trigger.target) trigger.directHit.add(trigger.target);
+        player.addMark("compat_ran", 1);
+      },
+    },
+  ]);
+  const runtime = new NonameCompatRoomRuntime([pack], "noname-skill-seed");
+  const event = {
+    id: "rule-compat-1",
+    name: "useCardToTarget" as const,
+    playerId: source.id,
+    data: {
+      cardId: "sha-1",
+      cardName: "sha",
+      sourceId: source.id,
+      targetId: target.id,
+      targetIndex: 0,
+      targetIds: [target.id],
+      directHitTargetIds: [],
+      excludedTargetIds: [],
+    },
+  };
+
+  const resolution = await runtime.runRuleEvent(current, event, 0);
+
+  assert.deepEqual(resolution.data?.directHitTargetIds, [target.id]);
+  assert.equal(source.marks.compat_ran, 1);
+  assert.equal(runtime.snapshot().records[0].hook, "ruleEvent");
+});
+
+test("a real pinned upstream Yingzi function runs through the isolated room runtime", async () => {
+  const module = await loadPinnedNonameSkillModule({
+    upstreamRoot,
+    pack: "standard",
+    seed: "isolated-upstream-yingzi",
+  });
+  try {
+    const upstream = module.skills.yingzi;
+    assert.ok(upstream.content);
+    const current = game();
+    const owner = current.state.players.find(
+      (player) => player.id === current.state.currentPlayerId,
+    )!;
+    owner.general.skills.push("yingzi");
+    const pack = advancedPack();
+    pack.runtime = defineNonameSkillRuntime([
+      {
+        id: "yingzi",
+        trigger: { player: "phaseDrawBegin2" },
+        filter: upstream.filter as never,
+        content: upstream.content as never,
+      },
+    ]);
+    const runtime = new NonameCompatRoomRuntime(
+      [pack],
+      "isolated-upstream-room",
+    );
+
+    const resolution = await runtime.runRuleEvent(
+      current,
+      {
+        id: "rule-upstream-yingzi",
+        name: "phaseDrawBegin2",
+        playerId: owner.id,
+        data: { num: 2, numFixed: false },
+      },
+      0,
+    );
+
+    assert.equal(resolution.data?.num, 3);
+  } finally {
+    module.dispose();
+  }
 });
 
 test("兼容钩子记录可在不重新执行作者代码时确定性回放", async () => {

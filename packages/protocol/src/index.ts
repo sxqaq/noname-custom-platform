@@ -168,6 +168,7 @@ export interface SkillModifierDto {
 export interface SkillDto {
   id: string;
   name: string;
+  runtimeOnly?: boolean;
   kind?: "trigger" | "active";
   event?: SkillEventDto;
   when?: RuleConditionDto;

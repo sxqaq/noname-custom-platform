@@ -15,6 +15,8 @@ import type {
   SkillModifierDto,
 } from "@sgs/protocol";
 
+export * from "./noname-skill-runtime.js";
+
 export const NONAME_COMPAT_UPSTREAM_COMMIT =
   "632d2d3c8da2893466a8c440a18861c9ed49813d";
 

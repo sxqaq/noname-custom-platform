@@ -181,6 +181,25 @@ test("schema v4 validates isolated noname-compatible runtimes", () => {
   };
   assert.equal(validatePackage(value).ok, true);
 
+  value.skills[0] = {
+    id: "test.skill",
+    name: "Runtime skill",
+    runtimeOnly: true,
+    effects: [],
+  };
+  assert.equal(validatePackage(value).ok, true);
+
+  const missingRuntime = structuredClone(value);
+  delete missingRuntime.runtime;
+  assert.equal(validatePackage(missingRuntime).ok, false);
+
+  const mixedRuntimeAndDsl = structuredClone(value);
+  mixedRuntimeAndDsl.skills[0].event = "turnStart";
+  mixedRuntimeAndDsl.skills[0].effects = [
+    { type: "draw", target: "self", count: 1 },
+  ];
+  assert.equal(validatePackage(mixedRuntimeAndDsl).ok, false);
+
   const unsafe = structuredClone(value);
   unsafe.runtime!.permissions.push("filesystem" as never);
   unsafe.runtime!.limits.timeoutMs = 60_000;

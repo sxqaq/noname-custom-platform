@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { evaluateIsolatedMod } from "../../noname-adapter/src/index.js";
 import {
   compilePlugin,
   condition,
   definePackage,
   definePlugin,
   defineRuntime,
+  defineNonameSkillRuntime,
   defineSkill,
   effect,
   modifier,
@@ -215,4 +217,91 @@ test("SDK types per-target directHit and excluded collections", () => {
 
   assert.match(runtime.source, /useCardToTarget/);
   assert.match(runtime.source, /directHitTargetIds/);
+});
+
+test("Noname-style trigger skills execute in isolation and emit authoritative patches", async () => {
+  const runtime = defineNonameSkillRuntime([
+    {
+      id: "custom.unavoidable",
+      trigger: { source: "useCardToTarget" },
+      filter(event, player) {
+        return event.card?.name === "sha" && player.isIn();
+      },
+      content(_event, trigger, player) {
+        if (trigger.target) trigger.directHit.add(trigger.target);
+        player.draw(1);
+      },
+    },
+  ]);
+  const output = await evaluateIsolatedMod<{
+    effects: Array<Record<string, unknown>>;
+    ruleEvent: { data: Record<string, unknown> };
+  }>({
+    source: runtime.source,
+    seed: "noname-skill-runtime",
+    input: {
+      hook: "ruleEvent",
+      state: undefined,
+      context: {
+        ruleEvent: {
+          id: "rule-1",
+          name: "useCardToTarget",
+          playerId: "a",
+          data: {
+            cardId: "sha-1",
+            cardName: "sha",
+            sourceId: "a",
+            targetId: "b",
+            targetIds: ["b"],
+            directHitTargetIds: [],
+            excludedTargetIds: [],
+          },
+        },
+      },
+      game: {
+        players: [
+          {
+            id: "a",
+            name: "Author",
+            hp: 4,
+            maxHp: 4,
+            alive: true,
+            hand: [],
+            equipment: {},
+            judgment: [],
+            marks: {},
+            grantedSkills: {},
+            general: {
+              faction: "qun",
+              gender: "male",
+              skills: ["custom.unavoidable"],
+            },
+          },
+          {
+            id: "b",
+            name: "Target",
+            hp: 4,
+            maxHp: 4,
+            alive: true,
+            hand: [],
+            equipment: {},
+            judgment: [],
+            marks: {},
+            grantedSkills: {},
+            general: { faction: "wei", gender: "male", skills: [] },
+          },
+        ],
+      },
+    },
+  });
+
+  assert.deepEqual(output.ruleEvent.data.directHitTargetIds, ["b"]);
+  assert.deepEqual(output.effects, [
+    {
+      type: "draw",
+      count: 1,
+      target: "selected",
+      targetPlayerId: "a",
+    },
+  ]);
 });

@@ -27,6 +27,7 @@
 - 效果可用 `targetPlayerId`/`toPlayerId` 指定任意存活玩家，整批效果由引擎原子应用；无效 ID 会回滚状态与随机源。
 - `NonameInteractionHost` 支持 16 类选择、`.set(...)` 链、直接 `await`、检查点和无代码回放。
 - `NonameEventBridge` 将父事件、触发事件、失牌/得牌/弃牌记录以及 `set/cancel/finish/goto`、`targets/directHit/excluded` 集合操作保存为有界变更日志，并可输出权威规则事件补丁。
+- `defineNonameSkillRuntime()` 已把同步 `trigger/filter/content`、技能持有者匹配、`game/get`、玩家效果方法和事件集合修改封装为可分发的隔离运行时；扩展用 `runtimeOnly` 声明避免核心 DSL 重复执行。
 
 `phaseDrawBegin2`、三段用牌主链、逐目标用牌事件、`directHit/excluded` 和六段伤害主链已接入真实引擎中断，但事件变更日志还没有接入濒死、判定和其余阶段中断点；扩展区和完整历史模型也尚未完成，因此不宣称上游技能已全量可玩。
 

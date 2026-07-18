@@ -10,12 +10,15 @@
 
 三层均只处理可结构化数据，不向技能代码暴露文件系统、网络、实时时钟或服务器对象。
 
+`defineNonameSkillRuntime()` 把这套边界提供给普通高级创作者：扩展以 `runtimeOnly` 技能声明武将归属，运行时按 `player/source/target/global` 匹配事件，在隔离 Worker 中执行同步 `filter/content`。玩家方法输出 `Effect[]`，事件字段和目标集合输出规则事件补丁；房主随后执行权限、配额和权威规则校验，其他联机客户端只接收结果。
+
 ## 已验证的真实技能
 
 - `standard.fanjian`：多步选择、断线检查点、回放。
 - `standard.kurou`：失去体力与摸牌的原子效果批。
 - `standard.luoyi`：回合期限临时技能与触发字段修改。
-- `standard.yingzi`：对摸牌事件 `num` 的可序列化修改。
+- `standard.yingzi`：固定上游真实 `filter/content` 可通过事件桥记录 `num` 修改，也可由 `defineNonameSkillRuntime()` 在房主隔离 Worker 中执行并把摸牌数补丁交回权威事件链。
+- `examples/plugins/noname-compatible-skill.ts`：可编译、可分发的无名杀式同步触发技，逐目标把杀设为不可响应。
 
 ## 高级 SDK 精确玩家效果
 

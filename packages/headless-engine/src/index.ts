@@ -114,6 +114,7 @@ export interface General {
 export interface CustomSkill {
   id: string;
   name: string;
+  runtimeOnly?: boolean;
   kind?: "trigger" | "active";
   event?: SkillEvent;
   when?: RuleCondition;
@@ -2732,7 +2733,11 @@ export class HeadlessGame {
     if (!this.hasSkill(player, command.skillId) && !equipmentSkill)
       throw new Error("武将没有该技能");
     const customSkill = this.skills.get(command.skillId);
-    if (customSkill && (customSkill.kind ?? "trigger") === "active") {
+    if (
+      customSkill &&
+      !customSkill.runtimeOnly &&
+      (customSkill.kind ?? "trigger") === "active"
+    ) {
       this.startCustomActiveSkill(player, customSkill, command);
       return;
     }
@@ -5147,7 +5152,7 @@ export class HeadlessGame {
   private modifierTotal(player: PlayerState, type: SkillModifier["type"]) {
     return this.skillIds(player).reduce((total, id) => {
       const skill = this.skills.get(id);
-      if (!skill) return total;
+      if (!skill || skill.runtimeOnly) return total;
       return (
         total +
         (skill.modifiers ?? [])
@@ -5176,6 +5181,7 @@ export class HeadlessGame {
       const skill = this.skills.get(id);
       if (
         !skill ||
+        skill.runtimeOnly ||
         (skill.kind ?? "trigger") !== "trigger" ||
         skill.event !== event ||
         (skill.when &&
@@ -5545,7 +5551,7 @@ export class HeadlessGame {
       throw new Error("当前不能提交该插件技能选择");
     const player = this.player(command.playerId);
     const skill = this.skills.get(pending.skillId);
-    if (!skill || (skill.kind ?? "trigger") !== "active")
+    if (!skill || skill.runtimeOnly || (skill.kind ?? "trigger") !== "active")
       throw new Error("插件主动技能定义不存在");
     const selection = pending.selection;
     if (selection.kind === "target" || selection.kind === "card") {
@@ -5643,7 +5649,12 @@ export class HeadlessGame {
     return this.skillIds(player)
       .map((id) => this.skills.get(id))
       .find((skill) => {
-        if (!skill || (skill.kind ?? "trigger") !== "active") return false;
+        if (
+          !skill ||
+          skill.runtimeOnly ||
+          (skill.kind ?? "trigger") !== "active"
+        )
+          return false;
         if (
           skill.when &&
           !this.evaluateCondition(
