@@ -305,3 +305,100 @@ test("Noname-style trigger skills execute in isolation and emit authoritative pa
     },
   ]);
 });
+
+test("Noname-style async choices suspend and deterministically resume", async () => {
+  const runtime = defineNonameSkillRuntime([
+    {
+      id: "custom.choose_excluded",
+      trigger: { source: "useCard" },
+      async content(_event, trigger, player) {
+        const result = await player
+          .chooseTarget({
+            prompt: "Choose an excluded target",
+            filterTarget(
+              _card: unknown,
+              owner: { id: string },
+              target: { id: string },
+            ) {
+              return owner.id !== target.id;
+            },
+          })
+          .forResult();
+        if (result.targets?.[0]) trigger.excluded.add(result.targets[0]);
+      },
+    },
+  ]);
+  const players = [
+    {
+      id: "a",
+      name: "Author",
+      hp: 4,
+      maxHp: 4,
+      alive: true,
+      hand: [],
+      equipment: {},
+      judgment: [],
+      marks: {},
+      grantedSkills: {},
+      general: { skills: ["custom.choose_excluded"] },
+    },
+    {
+      id: "b",
+      name: "Target",
+      hp: 4,
+      maxHp: 4,
+      alive: true,
+      hand: [],
+      equipment: {},
+      judgment: [],
+      marks: {},
+      grantedSkills: {},
+      general: { skills: [] },
+    },
+  ];
+  const ruleEvent = {
+    id: "rule-choice",
+    name: "useCard",
+    playerId: "a",
+    data: {
+      cardId: "sha-1",
+      cardName: "sha",
+      sourceId: "a",
+      targetIds: ["b"],
+      directHitTargetIds: [],
+      excludedTargetIds: [],
+    },
+  };
+  const suspended = await evaluateIsolatedMod<{
+    state: Record<string, unknown>;
+    request: {
+      playerId: string;
+      selection: { allowedTargetIds: string[] };
+    };
+  }>({
+    source: runtime.source,
+    seed: "async-choice-seed",
+    input: {
+      hook: "ruleEvent",
+      state: undefined,
+      context: { ruleEvent },
+      game: { players },
+    },
+  });
+  assert.equal(suspended.request.playerId, "a");
+  assert.deepEqual(suspended.request.selection.allowedTargetIds, ["b"]);
+
+  const completed = await evaluateIsolatedMod<{
+    ruleEvent: { data: { excludedTargetIds: string[] } };
+  }>({
+    source: runtime.source,
+    seed: "async-choice-seed",
+    input: {
+      hook: "choiceResponse",
+      state: suspended.state,
+      context: { choice: { targetIds: ["b"] } },
+      game: { players },
+    },
+  });
+  assert.deepEqual(completed.ruleEvent.data.excludedTargetIds, ["b"]);
+});

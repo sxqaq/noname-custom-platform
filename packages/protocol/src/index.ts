@@ -158,6 +158,8 @@ export interface SkillSelectionDto {
   consume?: "none" | "discard";
   options?: Array<{ id: string; label: string; value?: number }>;
   suits?: Array<"spade" | "heart" | "club" | "diamond">;
+  allowedTargetIds?: string[];
+  allowedCardIds?: string[];
 }
 export interface SkillModifierDto {
   type:

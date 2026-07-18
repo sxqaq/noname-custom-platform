@@ -213,6 +213,22 @@ export function validatePackage(input: unknown): ValidationResult {
         errors.push(`主动技能 ${item.name} 的选择步骤不能超过 8 个`);
       const selectionIds = new Set<string>();
       item.selections?.forEach((selection, selectionIndex) => {
+        for (const [field, values] of [
+          ["allowedTargetIds", selection.allowedTargetIds],
+          ["allowedCardIds", selection.allowedCardIds],
+        ] as const) {
+          if (
+            values !== undefined &&
+            (!Array.isArray(values) ||
+              values.length > 256 ||
+              new Set(values).size !== values.length ||
+              values.some(
+                (id) =>
+                  typeof id !== "string" || id.length < 1 || id.length > 128,
+              ))
+          )
+            errors.push(`主动技能 ${item.name} 的 ${field} 不合法`);
+        }
         if (
           !["target", "card", "option", "number", "suit"].includes(
             selection.kind,

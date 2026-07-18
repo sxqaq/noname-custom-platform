@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionPackageDto, RoomState } from "@sgs/protocol";
+import { defineNonameSkillRuntime } from "../../../packages/script-sdk/src/index.js";
 import { GameManager } from "../src/game-manager.js";
 
 function room(): RoomState {
@@ -150,6 +151,97 @@ test("GameManager 自动处理并回放对客户端隐藏的摸牌规则中断",
   assert.equal(
     replayed.view.players.find((player) => player.id === lordId)?.handCount,
     lord.handCount,
+  );
+});
+
+test("异步 Noname 技能在局域网权威链暂停、恢复并生成实用回放", async () => {
+  const manager = new GameManager();
+  const state = room();
+  const pack = runtimePack("() => ({})");
+  pack.runtime = defineNonameSkillRuntime([
+    {
+      id: "test.choose_draw_target",
+      trigger: { player: "phaseDrawBegin2" },
+      async content(_event, trigger, player) {
+        const result = await player
+          .chooseTarget({
+            prompt: "选择一名角色，然后额外摸一张牌",
+            filterTarget(
+              _card: unknown,
+              _owner: { id: string },
+              candidate: { isIn(): boolean },
+            ) {
+              return candidate.isIn();
+            },
+          })
+          .forResult();
+        if (result.targets?.length) trigger.num += 1;
+      },
+    },
+  ]);
+  pack.generals = [
+    {
+      id: "test.async_a",
+      name: "Async A",
+      faction: "qun",
+      hp: 4,
+      skills: ["test.choose_draw_target"],
+    },
+    {
+      id: "test.async_b",
+      name: "Async B",
+      faction: "qun",
+      hp: 4,
+      skills: ["test.choose_draw_target"],
+    },
+  ];
+  await manager.start(state, [pack]);
+
+  while (true) {
+    const pending = state.players
+      .map((player) => manager.view(state.id, player.id).pending)
+      .find((item) => item?.kind === "selectGeneral");
+    if (!pending || pending.kind !== "selectGeneral") break;
+    await manager.action(state.id, pending.playerId, {
+      action: "chooseGeneral",
+      generalId: pending.choices[0].id,
+    });
+  }
+
+  const chooserView = state.players
+    .map((player) => manager.view(state.id, player.id))
+    .find((view) => view.pending?.kind === "modChoice")!;
+  assert.equal(chooserView.pending?.kind, "modChoice");
+  const pending = chooserView.pending;
+  assert.ok(pending && pending.kind === "modChoice");
+  const chooserId = pending.playerId;
+  const otherId = chooserId === "a" ? "b" : "a";
+  assert.equal(manager.view(state.id, otherId).pending, undefined);
+  const beforeHand = chooserView.players.find(
+    (player) => player.id === chooserId,
+  )!.handCount;
+
+  await manager.action(state.id, chooserId, {
+    action: "modChoice",
+    requestId: pending.requestId,
+    targetIds: [otherId],
+  });
+
+  const after = manager.view(state.id, chooserId);
+  assert.equal(after.pending, undefined);
+  assert.equal(
+    after.players.find((player) => player.id === chooserId)?.handCount,
+    beforeHand + 3,
+  );
+  const replay = manager.listReplays()[0];
+  assert.ok(
+    replay.compatHooks?.some((record) => record.hook === "choiceResponse"),
+  );
+  const replayed = manager.replay(replay.id, replay.commands.length);
+  assert.equal(replayed.view.sequence, after.sequence);
+  assert.equal(
+    replayed.view.players.find((player) => player.id === chooserId)?.handCount,
+    after.players.find((player) => player.id === chooserId)?.handCount,
   );
 });
 

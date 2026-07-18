@@ -52,6 +52,7 @@ export interface NonameCompatHookRecord {
     logs: string[];
     request?: NonameCompatPendingChoice;
     ruleEvent?: RuleEventPatch;
+    continuation?: NonameCompatContinuation;
   };
   context: NonameCompatHookContext;
 }
@@ -84,13 +85,16 @@ interface HookOutput {
   ruleEvent?: RuleEventPatch;
 }
 
+export interface NonameCompatContinuation {
+  nextPackageIndex: number;
+  hook: Exclude<NonameCompatHook, "choiceResponse">;
+  commandIndex?: number;
+  context: NonameCompatHookContext;
+  replaySeedIndex?: number;
+}
+
 interface InternalPendingChoice extends NonameCompatPendingChoice {
-  continuation: {
-    nextPackageIndex: number;
-    hook: Exclude<NonameCompatHook, "choiceResponse" | "ruleEvent">;
-    commandIndex?: number;
-    context: NonameCompatHookContext;
-  };
+  continuation: NonameCompatContinuation;
 }
 
 export class NonameCompatRoomRuntime {
@@ -142,11 +146,20 @@ export class NonameCompatRoomRuntime {
     game: HeadlessGame,
     event: ExternalRuleEvent,
     commandIndex?: number,
-  ): Promise<ExternalRuleEventResolution> {
+  ): Promise<ExternalRuleEventResolution | undefined> {
     if (this.pending) throw new Error("高级 Mod 正在等待玩家选择");
+    return this.runRuleEventPackages(0, game, event, commandIndex);
+  }
+
+  private async runRuleEventPackages(
+    startIndex: number,
+    game: HeadlessGame,
+    event: ExternalRuleEvent,
+    commandIndex?: number,
+  ): Promise<ExternalRuleEventResolution | undefined> {
     let current = structuredClone(event);
     for (
-      let packageIndex = 0;
+      let packageIndex = startIndex;
       packageIndex < this.packages.length;
       packageIndex++
     ) {
@@ -159,14 +172,24 @@ export class NonameCompatRoomRuntime {
         { actorPlayerId: current.playerId, ruleEvent: current },
         {
           nextPackageIndex: packageIndex + 1,
-          hook: "afterCommand",
+          hook: "ruleEvent",
           commandIndex,
-          context: {},
+          context: {
+            actorPlayerId: current.playerId,
+            ruleEvent: structuredClone(current),
+          },
         },
       );
-      if (result.requested) throw new Error("规则事件钩子尚不能请求玩家输入");
       if (result.output?.ruleEvent)
         current = mergeRuleEvent(current, result.output.ruleEvent);
+      if (result.requested) {
+        if (this.pending)
+          this.pending.continuation.context = {
+            actorPlayerId: current.playerId,
+            ruleEvent: structuredClone(current),
+          };
+        return undefined;
+      }
     }
     return {
       eventId: current.id,
@@ -180,7 +203,7 @@ export class NonameCompatRoomRuntime {
     playerId: string,
     response: NonameCompatChoiceResponse,
     commandIndex: number,
-  ) {
+  ): Promise<ExternalRuleEventResolution | undefined> {
     const pending = this.pending;
     if (!pending) throw new Error("当前没有高级 Mod 选择请求");
     if (pending.playerId !== playerId) throw new Error("该选择不属于当前玩家");
@@ -206,14 +229,28 @@ export class NonameCompatRoomRuntime {
       context,
       continuation,
     );
-    if (!requestedAgain.requested)
-      await this.runPackages(
+    if (requestedAgain.requested) return undefined;
+    if (continuation.hook === "ruleEvent") {
+      const original = continuation.context.ruleEvent;
+      if (!original) throw new Error("规则事件续体缺少原始事件");
+      const current = requestedAgain.output?.ruleEvent
+        ? mergeRuleEvent(original, requestedAgain.output.ruleEvent)
+        : structuredClone(original);
+      return this.runRuleEventPackages(
         continuation.nextPackageIndex,
-        continuation.hook,
         game,
-        commandIndex,
-        continuation.context,
+        current,
+        continuation.commandIndex,
       );
+    }
+    await this.runPackages(
+      continuation.nextPackageIndex,
+      continuation.hook,
+      game,
+      commandIndex,
+      continuation.context,
+    );
+    return undefined;
   }
 
   replay(record: NonameCompatHookRecord, game: HeadlessGame) {
@@ -244,12 +281,14 @@ export class NonameCompatRoomRuntime {
     if (record.output.request)
       this.pending = {
         ...structuredClone(record.output.request),
-        continuation: {
-          nextPackageIndex: this.packages.length,
-          hook: "afterCommand",
-          commandIndex: record.commandIndex,
-          context: structuredClone(context),
-        },
+        continuation: structuredClone(
+          record.output.continuation ?? {
+            nextPackageIndex: this.packages.length,
+            hook: "afterCommand",
+            commandIndex: record.commandIndex,
+            context: structuredClone(context),
+          },
+        ),
       };
     this.records.push(structuredClone(record));
     this.nextHookIndex++;
@@ -308,6 +347,7 @@ export class NonameCompatRoomRuntime {
     const pack = this.packages[packageIndex];
     if (!pack.runtime) return { requested: false as const };
     const index = this.nextHookIndex++;
+    const seedIndex = continuation.replaySeedIndex ?? index;
     const input = this.createInput(
       pack,
       hook,
@@ -319,12 +359,15 @@ export class NonameCompatRoomRuntime {
     const output = await evaluateIsolatedMod<HookOutput>({
       source: pack.runtime.source,
       input,
-      seed: `${this.roomSeed}:${pack.id}:${index}`,
+      seed: `${this.roomSeed}:${pack.id}:${seedIndex}`,
       timeoutMs: pack.runtime.limits.timeoutMs,
       memoryMb: pack.runtime.limits.memoryMb,
     });
     const normalized = normalizeOutput(pack, output);
-    if (hook === "ruleEvent" && normalized.effects.length)
+    if (
+      (hook === "ruleEvent" || continuation.hook === "ruleEvent") &&
+      normalized.effects.length
+    )
       assertRuleEventEffectsSafe(pack.id, normalized.effects);
     if (normalized.effects.length)
       game.applyExternalEffects(
@@ -360,7 +403,10 @@ export class NonameCompatRoomRuntime {
       };
       this.pending = {
         ...structuredClone(request),
-        continuation: structuredClone(continuation),
+        continuation: structuredClone({
+          ...continuation,
+          replaySeedIndex: seedIndex,
+        }),
       };
     }
     this.records.push({
@@ -376,6 +422,9 @@ export class NonameCompatRoomRuntime {
         logs: [...normalized.logs],
         request: structuredClone(request),
         ruleEvent: structuredClone(normalized.ruleEvent),
+        continuation: request
+          ? structuredClone(this.pending?.continuation)
+          : undefined,
       },
     });
     return { requested: Boolean(request), output: normalized };
@@ -576,6 +625,11 @@ function validateChoiceResponse(
         throw new Error("该选择不能指定自己");
       if (selection.targetFilter === "wounded" && target.hp >= target.maxHp)
         throw new Error("该选择只能指定受伤角色");
+      if (
+        selection.allowedTargetIds &&
+        !selection.allowedTargetIds.includes(id)
+      )
+        throw new Error("选择了不在 Mod 候选范围内的目标");
     }
     return;
   }
@@ -598,6 +652,11 @@ function validateChoiceResponse(
     ]);
     if (ids.some((id) => !available.has(id)))
       throw new Error("选择了不属于该玩家或区域的卡牌");
+    if (
+      selection.allowedCardIds &&
+      ids.some((id) => !selection.allowedCardIds!.includes(id))
+    )
+      throw new Error("选择了不在 Mod 候选范围内的卡牌");
     return;
   }
   if (selection.kind === "option") {
