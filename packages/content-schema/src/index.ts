@@ -161,7 +161,7 @@ export function validatePackage(input: unknown): ValidationResult {
     if (seenSkills.has(item.id)) errors.push(`技能 ID ${item.id} 重复`);
     seenSkills.add(item.id);
     const kind = item.kind ?? "trigger";
-    if (kind === "trigger" && !item.event)
+    if (kind === "trigger" && !item.runtimeOnly && !item.event)
       errors.push(`触发技能 ${item.name} 必须声明 event`);
     if (
       item.event &&
@@ -207,7 +207,7 @@ export function validatePackage(input: unknown): ValidationResult {
           errors,
         );
     });
-    if (kind === "active") {
+    if (kind === "active" && !item.runtimeOnly) {
       if (item.event) errors.push(`主动技能 ${item.name} 不能声明 event`);
       if ((item.selections?.length ?? 0) > 8)
         errors.push(`主动技能 ${item.name} 的选择步骤不能超过 8 个`);
@@ -277,7 +277,32 @@ export function validatePackage(input: unknown): ValidationResult {
           errors.push(`主动技能 ${item.name} 的花色范围不合法`);
       });
     }
-    validateEffects(item.effects, `技能 ${item.name}`, errors);
+    if (item.runtimeOnly !== undefined && typeof item.runtimeOnly !== "boolean")
+      errors.push(`技能 ${item.name} 的 runtimeOnly 必须为布尔值`);
+    if (item.runtimeOnly && !value.runtime)
+      errors.push(`运行时技能 ${item.name} 缺少扩展 runtime`);
+    if (item.runtimeOnly && Array.isArray(item.effects) && item.effects.length)
+      errors.push(`运行时技能 ${item.name} 不能同时声明 DSL 效果`);
+    if (item.runtimeOnly && item.graph)
+      errors.push(`运行时技能 ${item.name} 不能同时声明节点图`);
+    if (
+      item.runtimeOnly &&
+      (item.event ||
+        item.when ||
+        item.usage ||
+        item.modifiers?.length ||
+        item.selections?.length)
+    )
+      errors.push(
+        `运行时技能 ${item.name} 不能同时声明 DSL 触发、选择或修正器`,
+      );
+    validateEffects(
+      item.effects,
+      `技能 ${item.name}`,
+      errors,
+      0,
+      item.runtimeOnly === true,
+    );
     if (countEffects(item.effects) > 256)
       errors.push(`技能 ${item.name} 的全部分支节点不能超过 256 个`);
     if (item.graph) validateGraph(item.graph, `技能 ${item.name}`, errors);

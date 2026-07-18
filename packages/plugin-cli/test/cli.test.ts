@@ -49,6 +49,7 @@ test("v1 and v2 reference plugins compile", async () => {
       "judgment-response",
       "conditional-state",
       "advanced-runtime",
+      "noname-compatible-skill",
     ]) {
       const result = spawnSync(
         process.execPath,

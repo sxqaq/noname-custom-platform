@@ -36,7 +36,7 @@
 - 与服务端共用规则内核的本地预览及扩展自动测试。
 - JSON 导入/导出、不可覆盖版本、SHA-256 内容锁和分享 ID。
 - `.sgspack` 把规则、图片、清单和精确依赖封装为可校验文件；局域网房主之间可下载、安装、保留旧版和安全卸载。
-- `@sgs/script-sdk` 将普通 TypeScript 创作编译成声明式 DSL，也提供显式授权的 `defineRuntime()` 高级钩子。
+- `@sgs/script-sdk` 将普通 TypeScript 创作编译成声明式 DSL，也提供显式授权的 `defineRuntime()` 高级钩子和无名杀式 `defineNonameSkillRuntime()`。
 - 武将立绘上传后安全解码、统一为 WebP、生成缩略图并按 SHA-256 存储；加入者从房主节点按哈希加载和缓存。
 - `@sgs/plugin-cli` 在隔离 VM 中编译作者代码，只允许官方 SDK；普通插件分发无函数 IR，高级插件的固定入口只在房主 Worker/VM 中运行，浏览器不执行远程代码。
 - 插件 IR 支持触发技、多段主动技、条件与状态、连续修正、临时技能、阶段控制、移动牌、判定分支和标准判定响应。
@@ -131,7 +131,7 @@ npm.cmd run installer:win
 
 ## 开放代码插件
 
-代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译并测试。普通能力生成规则 IR；复杂能力可用 `defineRuntime()` 进入房主的隔离权威运行时，远程玩家浏览器始终不执行作者源码。模板、命令和信任边界见 [插件 SDK](docs/plugin-sdk.md)。
+代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译并测试。普通能力生成规则 IR；复杂能力可用 `defineRuntime()`，或用 `defineNonameSkillRuntime()` 编写接近无名杀的 `trigger/filter/content`、玩家方法和目标集合操作。代码只进入房主的隔离权威运行时，远程玩家浏览器始终不执行作者源码。模板、命令和信任边界见 [插件 SDK](docs/plugin-sdk.md)。
 
 复用真实无名杀技能时，先运行 API 审计或迁移骨架命令；26 个官方技能包都能无 DOM 加载，但尚不能宣称全部技能可完整执行。当前分级与高频缺口见 [无名杀 API 兼容矩阵](docs/noname-api-matrix.md)，玩家代理、选择宿主和事件图见 [无名杀执行桥](docs/noname-execution-bridge.md)。
 
@@ -166,7 +166,7 @@ node scripts/e2e-smoke.mjs
 node scripts/e2e-content.mjs
 ```
 
-当前验收结果：153 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、玩家选择、断线重连和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，确定性摘要为 `a36c6fb3…96fefe`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
+当前验收结果：204 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、玩家选择、断线重连和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，确定性摘要为 `a36c6fb3…96fefe`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
 
 ## 安全与数据说明
 

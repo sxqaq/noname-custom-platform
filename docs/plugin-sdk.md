@@ -135,6 +135,34 @@ const runtime = defineRuntime<{ calls: number }>(
 
 插件同时在 `capabilities` 中声明 `advanced-runtime`，并把 `runtime` 放进 `definePackage()`。CLI 会用服务器相同的隔离执行器运行两次确定性冒烟测试；房主仍会在每次实际调用后校验权限、输出大小、日志和每一个效果。完整样例见 `examples/plugins/advanced-runtime.ts`。
 
+如果希望直接采用无名杀式技能结构，使用 `defineNonameSkillRuntime()`：
+
+```ts
+const skill = defineSkill({
+  id: "example.piercing",
+  name: "破阵",
+  runtimeOnly: true,
+  effects: [],
+});
+
+const runtime = defineNonameSkillRuntime([
+  {
+    id: skill.id,
+    trigger: { source: "useCardToTarget" },
+    filter(event, player) {
+      return get.name(event.card!) === "sha" && player.isIn();
+    },
+    content(_event, trigger, player) {
+      if (trigger.target) trigger.directHit.add(trigger.target);
+    },
+  },
+]);
+```
+
+运行时会按房间中实际持有该技能的武将匹配 `player/source/target/global` 触发角色。同步 `filter/content` 在隔离 Worker 内执行；`player.draw/recover/damage/loseHp/addMark/addSkill` 等调用转成结构化效果，`trigger.set/cancel/changeToZero` 及 `targets/directHit/excluded` 集合操作转成权威规则事件补丁。当前这一入口只支持同步触发技；需要 `chooseCard/chooseTarget` 的异步技能仍应使用高级运行时的宿主选择协议，后续会把它接入同一兼容入口。
+
+`runtimeOnly: true` 表示该技能由兼容运行时负责，核心 DSL 只保留技能 ID、名称和武将归属，不会再重复执行一遍空壳效果。`filter/content` 必须自包含，不能闭包引用文件里的局部变量；运行时提供确定性的 `Math.random`、`game`、`get`、`event/trigger/player` 代理。
+
 申请 `player-choice` 权限后，钩子还可以返回一个 `request`。当前统一支持目标、卡牌、选项、数字和花色五类选择；服务器校验请求与响应、保存指定响应玩家和稳定 `requestId`，并在 `choiceResponse` 钩子的 `input.context.choice` 中恢复执行。等待状态进入房间快照，因此指定玩家断线重连后仍看到同一个请求；离线超时可由确定性 AI 选择。响应和已校验输出进入回放，回放过程不重跑作者代码。
 
 ### 权威规则事件
@@ -282,5 +310,6 @@ const graphSkill = defineSkill({
 - `examples/plugins/judgment-response.ts`：`rules-ir/v1` 标准判定/响应链兼容样例；
 - `examples/plugins/conditional-state.ts`：IR 2.0 条件、状态和有界流程。
 - `examples/plugins/advanced-runtime.ts`：显式权限、持久状态和服务器权威代码钩子。
+- `examples/plugins/noname-compatible-skill.ts`：无名杀式 `trigger/filter/content`、玩家代理与目标集合修改。
 
 能用 IR 表达时仍优先使用 IR；无法表达时使用显式授权的高级运行时。任何情况下都不允许浏览器执行远程脚本，也不允许代码插件直接修改权威状态对象。

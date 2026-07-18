@@ -178,6 +178,50 @@ test("声明式自定义技能在无 DOM 引擎内触发", () => {
   }
 });
 
+test("runtime-only skills are owned by generals but never double-run as DSL", () => {
+  const game = HeadlessGame.create({
+    seed: 1,
+    players: [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ],
+    packages: [
+      {
+        id: "runtime.skill.test",
+        name: "Runtime skill test",
+        version: "1.0.0",
+        generals: [
+          {
+            id: "runtime_hero",
+            name: "Runtime hero",
+            faction: "qun",
+            hp: 4,
+            skills: ["runtime_only_draw"],
+          },
+        ],
+        skills: [
+          {
+            id: "runtime_only_draw",
+            name: "Runtime only",
+            runtimeOnly: true,
+            event: "turnStart",
+            effects: [],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(
+    game.state.log.some(
+      (entry) =>
+        entry.type === "skill.trigger" &&
+        entry.message.includes("Runtime only"),
+    ),
+    false,
+  );
+});
+
 test("自定义卡牌、牌堆和模式由权威引擎执行", () => {
   const pack = {
     id: "custom.rules",
