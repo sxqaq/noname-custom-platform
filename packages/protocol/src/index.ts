@@ -110,6 +110,7 @@ export interface EffectDto {
     | "recover"
     | "damage"
     | "addMark"
+    | "removeMark"
     | "discard"
     | "judge"
     | "if"
@@ -126,6 +127,7 @@ export interface EffectDto {
   amount?: number;
   mark?: string;
   target: EffectTarget;
+  targetPlayerId?: string;
   next?: string;
   successSuits?: Array<"spade" | "heart" | "club" | "diamond">;
   success?: EffectDto[];
@@ -142,6 +144,7 @@ export interface EffectDto {
   phase?: "judge" | "draw" | "play" | "discard" | "end";
   fromZone?: "hand" | "own";
   to?: RuleSubjectDto;
+  toPlayerId?: string;
   toZone?: "hand" | "discard";
 }
 export interface SkillSelectionDto {

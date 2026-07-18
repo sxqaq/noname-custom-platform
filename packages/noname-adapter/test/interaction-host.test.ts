@@ -14,10 +14,7 @@ const upstreamRoot = resolve(
   "../../../vendor/noname",
 );
 
-async function runFanjian(
-  host: NonameInteractionHost,
-  onDamage: () => void,
-) {
+async function runFanjian(host: NonameInteractionHost, onDamage: () => void) {
   const module = await loadPinnedNonameSkillModule({
     upstreamRoot,
     pack: "standard",
@@ -52,10 +49,12 @@ test("真实反间技能可由两段外部玩家输入驱动并确定性回放",
 
   const suitRequest = await host.waitForRequest();
   assert.equal(suitRequest.kind, "chooseControl");
-  assert.deepEqual(
-    (suitRequest.payload as { controls: string[] }).controls,
-    ["heart2", "diamond2", "club2", "spade2"],
-  );
+  assert.deepEqual((suitRequest.payload as { controls: string[] }).controls, [
+    "heart2",
+    "diamond2",
+    "club2",
+    "spade2",
+  ]);
   host.submit({
     requestId: suitRequest.id,
     playerId: "target",
@@ -139,6 +138,42 @@ test("交互宿主拒绝其他玩家代答", async () => {
       }),
     /无权回答/,
   );
-  host.submit({ requestId: request.id, playerId: "owner", result: { bool: false } });
+  host.submit({
+    requestId: request.id,
+    playerId: "owner",
+    result: { bool: false },
+  });
   assert.deepEqual(await result, { bool: false });
+});
+
+test("扩展选择种类保留 set 链参数并支持直接 await 与回放", async () => {
+  const host = new NonameInteractionHost();
+  const player = host.player("owner");
+  const completion = (async () =>
+    await player
+      .chooseButton({ buttons: ["one", "two"] })
+      .set("prompt", "选择一个按钮")
+      .set("ai", () => 1))();
+
+  const request = await host.waitForRequest();
+  assert.equal(request.kind, "chooseButton");
+  assert.deepEqual(request.payload, {
+    buttons: ["one", "two"],
+    prompt: "选择一个按钮",
+  });
+  host.submit({
+    requestId: request.id,
+    playerId: "owner",
+    result: { bool: true, links: ["two"] },
+  });
+  assert.deepEqual(await completion, { bool: true, links: ["two"] });
+
+  const replay = new NonameInteractionHost(host.journal());
+  const replayResult = await replay
+    .player("owner")
+    .chooseButton({ buttons: ["one", "two"] })
+    .set("prompt", "选择一个按钮")
+    .set("ai", () => 2);
+  assert.deepEqual(replayResult, { bool: true, links: ["two"] });
+  assert.deepEqual(replay.journal(), host.journal());
 });
