@@ -111,7 +111,7 @@ export default definePlugin({
 
 ## 高级运行时插件
 
-`defineRuntime()` 接收一个同步、自包含的 TypeScript 函数。函数只能使用输入、JavaScript 内建值和宿主提供的确定性 `Math.random`；不能捕获导入的帮助函数或模块局部变量。它接收 `roomStart`、`afterCommand` 钩子、上次持久状态、实际命令、命令产生的核心事件、操作者/首个目标以及经过权限裁剪的权威游戏状态，返回新状态、规则效果及有限日志。效果中的 `self` 和 `selected` 分别映射实际操作者和目标，而不是误用当前回合角色。
+`defineRuntime()` 接收一个同步、自包含的 TypeScript 函数。函数只能使用输入、JavaScript 内建值和宿主提供的确定性 `Math.random`；不能捕获导入的帮助函数或模块局部变量。它接收 `roomStart`、`afterCommand`、`choiceResponse` 和 `ruleEvent` 钩子、上次持久状态、实际命令、命令产生的核心事件、操作者/首个目标以及经过权限裁剪的权威游戏状态，返回新状态、规则效果及有限日志。效果中的 `self` 和 `selected` 分别映射实际操作者和目标，而不是误用当前回合角色。
 
 ```ts
 const runtime = defineRuntime<{ calls: number }>(
@@ -136,6 +136,22 @@ const runtime = defineRuntime<{ calls: number }>(
 插件同时在 `capabilities` 中声明 `advanced-runtime`，并把 `runtime` 放进 `definePackage()`。CLI 会用服务器相同的隔离执行器运行两次确定性冒烟测试；房主仍会在每次实际调用后校验权限、输出大小、日志和每一个效果。完整样例见 `examples/plugins/advanced-runtime.ts`。
 
 申请 `player-choice` 权限后，钩子还可以返回一个 `request`。当前统一支持目标、卡牌、选项、数字和花色五类选择；服务器校验请求与响应、保存指定响应玩家和稳定 `requestId`，并在 `choiceResponse` 钩子的 `input.context.choice` 中恢复执行。等待状态进入房间快照，因此指定玩家断线重连后仍看到同一个请求；离线超时可由确定性 AI 选择。响应和已校验输出进入回放，回放过程不重跑作者代码。
+
+### 权威规则事件
+
+`ruleEvent` 在引擎的内部规则点暂停。当前第一个稳定事件是 `phaseDrawBegin2`：
+
+```ts
+if (
+  input.hook === "ruleEvent" &&
+  input.context.ruleEvent?.name === "phaseDrawBegin2"
+) {
+  const count = Number(input.context.ruleEvent.data.num ?? 2);
+  return { ruleEvent: { data: { num: count + 1 } } };
+}
+```
+
+事件变更需要 `game-state` 权限，会进入房主快照和回放。该钩子当前不允许请求玩家输入；为避免覆盖未完成的内部中断，伤害、失去体力、判定、弃牌和移牌效果也暂时拒绝。
 
 ## SDK 能力
 

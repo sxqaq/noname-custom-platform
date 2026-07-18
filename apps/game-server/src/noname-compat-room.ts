@@ -3,6 +3,8 @@ import { validatePackage } from "@sgs/content-schema";
 import {
   HeadlessGame,
   type Effect,
+  type ExternalRuleEvent,
+  type ExternalRuleEventResolution,
   type GameCommand,
   type GameLog,
 } from "@sgs/headless-engine";
@@ -13,7 +15,13 @@ import type {
   SkillSelectionDto,
 } from "@sgs/protocol";
 
-export type NonameCompatHook = "roomStart" | "afterCommand" | "choiceResponse";
+export type NonameCompatHook =
+  "roomStart" | "afterCommand" | "choiceResponse" | "ruleEvent";
+
+interface RuleEventPatch {
+  cancelled?: boolean;
+  data?: Record<string, unknown>;
+}
 
 export interface NonameCompatChoiceResponse {
   requestId: string;
@@ -43,6 +51,7 @@ export interface NonameCompatHookRecord {
     effects: EffectDto[];
     logs: string[];
     request?: NonameCompatPendingChoice;
+    ruleEvent?: RuleEventPatch;
   };
   context: NonameCompatHookContext;
 }
@@ -61,6 +70,7 @@ export interface NonameCompatHookContext {
   actorPlayerId?: string;
   selectedPlayerId?: string;
   choice?: NonameCompatChoiceResponse;
+  ruleEvent?: ExternalRuleEvent;
 }
 
 interface HookOutput {
@@ -71,12 +81,13 @@ interface HookOutput {
     playerId?: string;
     selection: SkillSelectionDto;
   };
+  ruleEvent?: RuleEventPatch;
 }
 
 interface InternalPendingChoice extends NonameCompatPendingChoice {
   continuation: {
     nextPackageIndex: number;
-    hook: Exclude<NonameCompatHook, "choiceResponse">;
+    hook: Exclude<NonameCompatHook, "choiceResponse" | "ruleEvent">;
     commandIndex?: number;
     context: NonameCompatHookContext;
   };
@@ -116,7 +127,7 @@ export class NonameCompatRoomRuntime {
   }
 
   async run(
-    hook: NonameCompatHook,
+    hook: Exclude<NonameCompatHook, "ruleEvent">,
     game: HeadlessGame,
     commandIndex?: number,
     context: NonameCompatHookContext = {},
@@ -125,6 +136,43 @@ export class NonameCompatRoomRuntime {
       throw new Error("choiceResponse 必须通过 respond() 执行");
     if (this.pending) throw new Error("高级 Mod 正在等待玩家选择");
     await this.runPackages(0, hook, game, commandIndex, context);
+  }
+
+  async runRuleEvent(
+    game: HeadlessGame,
+    event: ExternalRuleEvent,
+    commandIndex?: number,
+  ): Promise<ExternalRuleEventResolution> {
+    if (this.pending) throw new Error("高级 Mod 正在等待玩家选择");
+    let current = structuredClone(event);
+    for (
+      let packageIndex = 0;
+      packageIndex < this.packages.length;
+      packageIndex++
+    ) {
+      if (!this.packages[packageIndex].runtime) continue;
+      const result = await this.executePackage(
+        packageIndex,
+        "ruleEvent",
+        game,
+        commandIndex,
+        { actorPlayerId: current.playerId, ruleEvent: current },
+        {
+          nextPackageIndex: packageIndex + 1,
+          hook: "afterCommand",
+          commandIndex,
+          context: {},
+        },
+      );
+      if (result.requested) throw new Error("规则事件钩子尚不能请求玩家输入");
+      if (result.output?.ruleEvent)
+        current = mergeRuleEvent(current, result.output.ruleEvent);
+    }
+    return {
+      eventId: current.id,
+      cancelled: current.data.cancelled === true,
+      data: structuredClone(current.data),
+    };
   }
 
   async respond(
@@ -158,7 +206,7 @@ export class NonameCompatRoomRuntime {
       context,
       continuation,
     );
-    if (!requestedAgain)
+    if (!requestedAgain.requested)
       await this.runPackages(
         continuation.nextPackageIndex,
         continuation.hook,
@@ -221,7 +269,7 @@ export class NonameCompatRoomRuntime {
 
   private async runPackages(
     startIndex: number,
-    hook: Exclude<NonameCompatHook, "choiceResponse">,
+    hook: Exclude<NonameCompatHook, "choiceResponse" | "ruleEvent">,
     game: HeadlessGame,
     commandIndex: number | undefined,
     context: NonameCompatHookContext,
@@ -245,7 +293,7 @@ export class NonameCompatRoomRuntime {
           context: structuredClone(context),
         },
       );
-      if (requested) return;
+      if (requested.requested) return;
     }
   }
 
@@ -258,7 +306,7 @@ export class NonameCompatRoomRuntime {
     continuation: InternalPendingChoice["continuation"],
   ) {
     const pack = this.packages[packageIndex];
-    if (!pack.runtime) return false;
+    if (!pack.runtime) return { requested: false as const };
     const index = this.nextHookIndex++;
     const input = this.createInput(
       pack,
@@ -276,6 +324,8 @@ export class NonameCompatRoomRuntime {
       memoryMb: pack.runtime.limits.memoryMb,
     });
     const normalized = normalizeOutput(pack, output);
+    if (hook === "ruleEvent" && normalized.effects.length)
+      assertRuleEventEffectsSafe(pack.id, normalized.effects);
     if (normalized.effects.length)
       game.applyExternalEffects(
         normalized.effects as Effect[],
@@ -325,9 +375,10 @@ export class NonameCompatRoomRuntime {
         effects: structuredClone(normalized.effects),
         logs: [...normalized.logs],
         request: structuredClone(request),
+        ruleEvent: structuredClone(normalized.ruleEvent),
       },
     });
-    return Boolean(request);
+    return { requested: Boolean(request), output: normalized };
   }
 
   private createInput(
@@ -352,6 +403,7 @@ export class NonameCompatRoomRuntime {
         actorPlayerId: context.actorPlayerId,
         selectedPlayerId: context.selectedPlayerId,
         choice: structuredClone(context.choice),
+        ruleEvent: structuredClone(context.ruleEvent),
       },
       game: fullState
         ? JSON.parse(game.snapshot())
@@ -396,11 +448,76 @@ function normalizeOutput(pack: ExtensionPackageDto, output: HookOutput) {
       typeof request.selection !== "object")
   )
     throw new Error(`兼容扩展 ${pack.id} 的玩家选择请求不合法`);
+  if (output.ruleEvent && !pack.runtime!.permissions.includes("game-state"))
+    throw new Error(
+      `兼容扩展 ${pack.id} 未申请 game-state 权限，不能修改规则事件`,
+    );
   return {
     state,
     effects: structuredClone(effects),
     logs: [...logs],
     request: structuredClone(request),
+    ruleEvent: normalizeRuleEventPatch(pack.id, output.ruleEvent),
+  };
+}
+
+function normalizeRuleEventPatch(
+  packageId: string,
+  value: RuleEventPatch | undefined,
+): RuleEventPatch | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`兼容扩展 ${packageId} 的 ruleEvent 不合法`);
+  if (value.cancelled !== undefined && typeof value.cancelled !== "boolean")
+    throw new Error(`兼容扩展 ${packageId} 的 ruleEvent.cancelled 不合法`);
+  if (
+    value.data !== undefined &&
+    (!value.data || typeof value.data !== "object" || Array.isArray(value.data))
+  )
+    throw new Error(`兼容扩展 ${packageId} 的 ruleEvent.data 不合法`);
+  const normalized = structuredClone(value);
+  if (Buffer.byteLength(JSON.stringify(normalized), "utf8") > 64 * 1024)
+    throw new Error(`兼容扩展 ${packageId} 的 ruleEvent 超过 64 KiB`);
+  return normalized;
+}
+
+function assertRuleEventEffectsSafe(packageId: string, effects: EffectDto[]) {
+  const safe = new Set<EffectDto["type"]>([
+    "draw",
+    "recover",
+    "addMark",
+    "removeMark",
+    "if",
+    "repeat",
+    "setState",
+    "changeState",
+    "changeMaxHp",
+    "grantSkill",
+    "removeSkill",
+    "skipPhase",
+  ]);
+  const visit = (nodes: EffectDto[]) => {
+    for (const effect of nodes) {
+      if (!safe.has(effect.type))
+        throw new Error(
+          `兼容扩展 ${packageId} 不能在规则事件中直接执行 ${effect.type}，该效果可能产生嵌套中断`,
+        );
+      visit(effect.then ?? []);
+      visit(effect.else ?? []);
+      visit(effect.body ?? []);
+    }
+  };
+  visit(effects);
+}
+
+function mergeRuleEvent(event: ExternalRuleEvent, patch: RuleEventPatch) {
+  return {
+    ...structuredClone(event),
+    data: {
+      ...structuredClone(event.data),
+      ...structuredClone(patch.data ?? {}),
+      ...(patch.cancelled === undefined ? {} : { cancelled: patch.cancelled }),
+    },
   };
 }
 

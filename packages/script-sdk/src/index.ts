@@ -20,7 +20,7 @@ export const NONAME_COMPAT_UPSTREAM_COMMIT =
 
 export interface RuntimeHookInput<State = unknown> {
   apiVersion: "noname-compat/v1";
-  hook: "roomStart" | "afterCommand" | "choiceResponse";
+  hook: "roomStart" | "afterCommand" | "choiceResponse" | "ruleEvent";
   hookIndex: number;
   commandIndex?: number;
   packageId: string;
@@ -50,6 +50,12 @@ export interface RuntimeHookInput<State = unknown> {
       numberValue?: number;
       suit?: "spade" | "heart" | "club" | "diamond";
     };
+    ruleEvent?: Readonly<{
+      id: string;
+      name: "phaseDrawBegin2";
+      playerId: string;
+      data: Readonly<Record<string, unknown>>;
+    }>;
   };
 }
 
@@ -60,6 +66,10 @@ export interface RuntimeHookOutput<State = unknown> {
   request?: {
     playerId?: string;
     selection: SkillSelectionDto;
+  };
+  ruleEvent?: {
+    cancelled?: boolean;
+    data?: Record<string, unknown>;
   };
 }
 

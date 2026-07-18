@@ -112,3 +112,91 @@ test("兼容 Mod 失败会同时回滚核心命令和 Mod 检查点", async () =
   assert.equal(manager.listReplays()[0].commands.length, 0);
   assert.equal(manager.listReplays()[0].compatHooks?.length, 1);
 });
+
+test("GameManager 自动处理并回放对客户端隐藏的摸牌规则中断", async () => {
+  const manager = new GameManager();
+  const state = room();
+  const pack = runtimePack(`(input) => input.hook === "ruleEvent"
+      ? ({ ruleEvent: { data: { num: 5 } } })
+      : ({})`);
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  await manager.start(state, [pack]);
+
+  let lordId: string | undefined;
+  while (true) {
+    const pending = state.players
+      .map((player) => manager.view(state.id, player.id).pending)
+      .find((item) => item?.kind === "selectGeneral");
+    if (!pending || pending.kind !== "selectGeneral") break;
+    lordId ??= pending.playerId;
+    await manager.action(state.id, pending.playerId, {
+      action: "chooseGeneral",
+      generalId: pending.choices[0].id,
+    });
+  }
+
+  assert.ok(lordId);
+  const view = manager.view(state.id, lordId);
+  const lord = view.players.find((player) => player.id === lordId)!;
+  assert.equal(view.pending, undefined);
+  assert.equal(lord.handCount, 9);
+  const replay = manager.listReplays()[0];
+  assert.ok(replay.compatHooks?.some((record) => record.hook === "ruleEvent"));
+  const replayed = manager.replay(replay.id, replay.commands.length);
+  assert.equal(replayed.view.sequence, view.sequence);
+  assert.equal(
+    replayed.view.players.find((player) => player.id === lordId)?.handCount,
+    lord.handCount,
+  );
+});
+
+test("非法规则事件修改会原子回滚触发它的核心命令和 Mod 状态", async () => {
+  const manager = new GameManager();
+  const state = room();
+  const pack = runtimePack(`(input) => input.hook === "ruleEvent"
+      ? ({ state: { touched: true }, ruleEvent: { data: { num: 99 } } })
+      : ({})`);
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  await manager.start(state, [pack]);
+
+  const firstPending = state.players
+    .map((player) => manager.view(state.id, player.id).pending)
+    .find((item) => item?.kind === "selectGeneral");
+  assert.equal(firstPending?.kind, "selectGeneral");
+  await manager.action(state.id, firstPending!.playerId, {
+    action: "chooseGeneral",
+    generalId: firstPending!.choices[0].id,
+  });
+
+  const secondPending = state.players
+    .map((player) => manager.view(state.id, player.id).pending)
+    .find((item) => item?.kind === "selectGeneral");
+  assert.equal(secondPending?.kind, "selectGeneral");
+  const beforeA = manager.view(state.id, "a");
+  const beforeB = manager.view(state.id, "b");
+  const replayBefore = structuredClone(manager.listReplays()[0]);
+
+  await assert.rejects(
+    manager.action(state.id, secondPending!.playerId, {
+      action: "chooseGeneral",
+      generalId: secondPending!.choices[0].id,
+    }),
+    /0 to 20/,
+  );
+
+  assert.equal(
+    JSON.stringify(manager.view(state.id, "a")),
+    JSON.stringify(beforeA),
+  );
+  assert.equal(
+    JSON.stringify(manager.view(state.id, "b")),
+    JSON.stringify(beforeB),
+  );
+  assert.deepEqual(manager.listReplays()[0], replayBefore);
+});

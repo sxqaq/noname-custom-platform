@@ -173,6 +173,17 @@ export interface Card {
   /** Effective delayed-trick name while this physical card is in judgment. */
   virtualName?: string;
 }
+export interface ExternalRuleEvent {
+  id: string;
+  name: "phaseDrawBegin2";
+  playerId: string;
+  data: Record<string, unknown>;
+}
+export interface ExternalRuleEventResolution {
+  eventId: string;
+  cancelled?: boolean;
+  data?: Record<string, unknown>;
+}
 export interface PlayerState {
   id: string;
   name: string;
@@ -406,7 +417,13 @@ export type PendingResponse =
       cardId: string;
       resumePhase: "play";
     }
-  | { playerId: string; kind: "tuxi"; maxTargets: 2 }
+  | { playerId: string; kind: "tuxi"; maxTargets: 2; drawCount?: number }
+  | {
+      playerId: string;
+      kind: "externalRuleEvent";
+      event: ExternalRuleEvent;
+      continuation: { kind: "draw" };
+    }
   | {
       playerId: string;
       kind: "fankui";
@@ -530,6 +547,8 @@ export interface GameState {
   mode: ModeDefinition;
   pending?: PendingResponse;
   log: GameLog[];
+  externalRuleEvents?: boolean;
+  ruleEventSequence?: number;
 }
 export type GameCommand =
   | { type: "chooseGeneral"; playerId: string; generalId: string }
@@ -570,6 +589,8 @@ export interface GameConfig {
   fixedLordId?: string;
   /** Enables the server-authoritative identity-mode general selection stage. */
   generalSelection?: boolean;
+  /** Pauses at serializable rule-event boundaries for the authoritative host. */
+  externalRuleEvents?: boolean;
 }
 
 const standardGenerals: General[] = [
@@ -1190,6 +1211,8 @@ export class HeadlessGame {
       shaUsed: false,
       mode,
       log: [],
+      externalRuleEvents: config.externalRuleEvents ?? false,
+      ruleEventSequence: 0,
     });
     packages
       .flatMap((pack) => pack.skills)
@@ -1222,6 +1245,8 @@ export class HeadlessGame {
     game.state.players.forEach((player) => {
       player.grantedSkills ??= {};
     });
+    game.state.externalRuleEvents ??= false;
+    game.state.ruleEventSequence ??= 0;
     packages
       .flatMap((pack) => pack.skills)
       .forEach((skill) => game.skills.set(skill.id, skill));
@@ -1233,6 +1258,46 @@ export class HeadlessGame {
   snapshot() {
     this.state.rngState = this.rng.state;
     return JSON.stringify(this.state);
+  }
+  externalRuleEvent() {
+    return this.state.pending?.kind === "externalRuleEvent"
+      ? structuredClone(this.state.pending.event)
+      : undefined;
+  }
+  resumeExternalRuleEvent(resolution: ExternalRuleEventResolution) {
+    const stateBefore = structuredClone(this.state);
+    const rngBefore = this.rng.state;
+    const queuedBefore = structuredClone(this.queuedOptionalDraws);
+    const suppressedBefore = new Set(this.suppressLianying);
+    const before = this.state.sequence;
+    try {
+      const pending = this.state.pending;
+      if (!pending || pending.kind !== "externalRuleEvent")
+        throw new Error("No authoritative rule event is waiting");
+      if (resolution.eventId !== pending.event.id)
+        throw new Error("Authoritative rule event ID does not match");
+      const num = resolution.data?.num ?? pending.event.data.num;
+      if (!Number.isInteger(num) || Number(num) < 0 || Number(num) > 20)
+        throw new Error(
+          "Rule event draw count must be an integer from 0 to 20",
+        );
+      delete this.state.pending;
+      if (pending.continuation.kind === "draw")
+        this.continueDrawPhase(
+          this.player(pending.playerId),
+          Number(num),
+          resolution.cancelled === true || resolution.data?.cancelled === true,
+        );
+      this.flushOptionalDraws();
+      this.state.rngState = this.rng.state;
+      return this.state.log.filter((item) => item.sequence > before);
+    } catch (error) {
+      this.state = stateBefore;
+      this.rng.state = rngBefore;
+      this.queuedOptionalDraws = queuedBefore;
+      this.suppressLianying = suppressedBefore;
+      throw error;
+    }
   }
   dispatch(command: GameCommand, options: { atomic?: boolean } = {}) {
     if (this.state.status !== "playing") throw new Error("游戏已经结束");
@@ -1318,15 +1383,17 @@ export class HeadlessGame {
         ? this.state.pending.responders[this.state.pending.responderIndex]
         : this.state.pending?.playerId;
     const visiblePending =
-      pendingViewer !== playerId
+      this.state.pending?.kind === "externalRuleEvent"
         ? undefined
-        : this.state.pending?.kind === "selectGeneral"
-          ? {
-              playerId: this.state.pending.playerId,
-              kind: this.state.pending.kind,
-              choices: this.state.pending.choices,
-            }
-          : this.state.pending;
+        : pendingViewer !== playerId
+          ? undefined
+          : this.state.pending?.kind === "selectGeneral"
+            ? {
+                playerId: this.state.pending.playerId,
+                kind: this.state.pending.kind,
+                choices: this.state.pending.choices,
+              }
+            : this.state.pending;
     return {
       status: this.state.status,
       winner: this.state.winner,
@@ -2263,6 +2330,7 @@ export class HeadlessGame {
       return;
     }
     if (this.state.pending?.kind === "tuxi" && command.skillId === "tuxi") {
+      const pending = this.state.pending;
       const targets = command.targetIds ?? [];
       if (targets.length > 2 || new Set(targets).size !== targets.length)
         throw new Error("突袭至多选择两名不同角色");
@@ -2282,7 +2350,7 @@ export class HeadlessGame {
         player,
         Math.max(
           0,
-          this.state.mode.drawPerTurn +
+          (pending.drawCount ?? this.state.mode.drawPerTurn) +
             (player.general.skills.includes("yingzi") ? 1 : 0) -
             targets.length,
         ),
@@ -3603,8 +3671,39 @@ export class HeadlessGame {
       return;
     }
     this.log("phase.draw", `${player.name}的摸牌阶段`);
+    if (this.state.externalRuleEvents) {
+      const event: ExternalRuleEvent = {
+        id: `rule-${++this.state.ruleEventSequence!}`,
+        name: "phaseDrawBegin2",
+        playerId: player.id,
+        data: { num: this.state.mode.drawPerTurn, numFixed: false },
+      };
+      this.state.pending = {
+        playerId: player.id,
+        kind: "externalRuleEvent",
+        event,
+        continuation: { kind: "draw" },
+      };
+      return;
+    }
+    this.continueDrawPhase(player, this.state.mode.drawPerTurn, false);
+  }
+  private continueDrawPhase(
+    player: PlayerState,
+    drawCount: number,
+    cancelled: boolean,
+  ) {
+    if (cancelled) {
+      this.completeDrawPhase(player, 0, false);
+      return;
+    }
     if (player.general.skills.includes("tuxi")) {
-      this.state.pending = { playerId: player.id, kind: "tuxi", maxTargets: 2 };
+      this.state.pending = {
+        playerId: player.id,
+        kind: "tuxi",
+        maxTargets: 2,
+        drawCount,
+      };
       this.log("skill.tuxi.wait", `${player.name}可以发动突袭选择至多两名角色`);
       return;
     }
@@ -3618,12 +3717,12 @@ export class HeadlessGame {
         skillId: drawSkills[0],
         continuation: "draw",
         remainingSkills: drawSkills.slice(1),
-        drawCount: this.state.mode.drawPerTurn,
+        drawCount,
       };
       this.log("skill.phase.wait", `${player.name}可以发动${drawSkills[0]}`);
       return;
     }
-    this.completeDrawPhase(player, this.state.mode.drawPerTurn);
+    this.completeDrawPhase(player, drawCount);
   }
   private continueJudgmentPhase(player: PlayerState) {
     this.state.phase = "judge";

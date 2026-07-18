@@ -25,6 +25,7 @@ interface RunningGame {
     packages: ExtensionPackageDto[];
     modeId?: string;
     generalSelection?: boolean;
+    externalRuleEvents?: boolean;
     compatSeed: string;
   };
   commands: RecordedCommand[];
@@ -60,6 +61,7 @@ export class GameManager {
       packages,
       modeId: room.modeId,
       generalSelection: true,
+      externalRuleEvents: packages.some((pack) => Boolean(pack.runtime)),
       compatSeed: `${room.id}:${seed}`,
     };
     const game = HeadlessGame.create(config);
@@ -75,6 +77,7 @@ export class GameManager {
       createdAt: new Date().toISOString(),
       updatedAt: Date.now(),
     };
+    if (!compat.pendingChoice()) await this.drainRuleEvents(running);
     this.games.set(room.id, running);
     this.saveReplay(running);
   }
@@ -234,10 +237,15 @@ export class GameManager {
           record.hook === "roomStart" && record.commandIndex === undefined,
       )
       .forEach((record) => compat.replay(record, game));
+    this.replayRuleEvents(game, compat, hooks, undefined);
     running.commands.slice(0, count).forEach((command, commandIndex) => {
       if (command.type !== "compatChoice") game.dispatch(command);
+      this.replayRuleEvents(game, compat, hooks, commandIndex);
       hooks
-        .filter((record) => record.commandIndex === commandIndex)
+        .filter(
+          (record) =>
+            record.commandIndex === commandIndex && record.hook !== "ruleEvent",
+        )
         .forEach((record) => compat.replay(record, game));
     });
     return {
@@ -257,7 +265,12 @@ export class GameManager {
     const compatBefore = running.compat.snapshot();
     const commandIndex = running.commands.length;
     try {
-      const events = running.game.dispatch(command);
+      const beforeSequence = running.game.state.sequence;
+      running.game.dispatch(command);
+      await this.drainRuleEvents(running, commandIndex);
+      const events = running.game.state.log.filter(
+        (event) => event.sequence > beforeSequence,
+      );
       await running.compat.run(
         "afterCommand",
         running.game,
@@ -295,6 +308,8 @@ export class GameManager {
         choice,
         commandIndex,
       );
+      if (!running.compat.pendingChoice())
+        await this.drainRuleEvents(running, commandIndex);
       running.commands.push({
         type: "compatChoice",
         playerId,
@@ -327,6 +342,53 @@ export class GameManager {
     const index = this.replays.findIndex((item) => item.id === replay.id);
     if (index < 0) this.replays.unshift(replay);
     else this.replays[index] = replay;
+  }
+
+  private async drainRuleEvents(running: RunningGame, commandIndex?: number) {
+    for (let count = 0; count < 64; count++) {
+      const event = running.game.externalRuleEvent();
+      if (!event) return;
+      const resolution = await running.compat.runRuleEvent(
+        running.game,
+        event,
+        commandIndex,
+      );
+      running.game.resumeExternalRuleEvent(resolution);
+    }
+    throw new Error("单次命令触发的内部规则事件超过 64 个");
+  }
+
+  private replayRuleEvents(
+    game: HeadlessGame,
+    compat: NonameCompatRoomRuntime,
+    records: NonameCompatHookRecord[],
+    commandIndex?: number,
+  ) {
+    for (let count = 0; count < 64; count++) {
+      const event = game.externalRuleEvent();
+      if (!event) return;
+      let data = structuredClone(event.data);
+      let cancelled = false;
+      const matching = records.filter(
+        (record) =>
+          record.hook === "ruleEvent" &&
+          record.commandIndex === commandIndex &&
+          record.context.ruleEvent?.id === event.id,
+      );
+      if (!matching.length)
+        throw new Error(`回放缺少规则事件 ${event.id} 的兼容钩子`);
+      for (const record of matching) {
+        compat.replay(record, game);
+        data = {
+          ...data,
+          ...structuredClone(record.output.ruleEvent?.data ?? {}),
+        };
+        if (record.output.ruleEvent?.cancelled !== undefined)
+          cancelled = record.output.ruleEvent.cancelled;
+      }
+      game.resumeExternalRuleEvent({ eventId: event.id, data, cancelled });
+    }
+    throw new Error("回放中的内部规则事件超过 64 个");
   }
 }
 

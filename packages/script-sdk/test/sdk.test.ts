@@ -132,3 +132,22 @@ test("SDK addresses exact runtime players and removes marks declaratively", () =
   assert.equal(move.targetPlayerId, "player-b");
   assert.equal(move.toPlayerId, "player-c");
 });
+
+test("SDK types authoritative draw-rule event patches", () => {
+  const runtime = defineRuntime((input) => {
+    if (
+      input.hook === "ruleEvent" &&
+      input.context.ruleEvent?.name === "phaseDrawBegin2"
+    ) {
+      return {
+        ruleEvent: {
+          data: { num: Number(input.context.ruleEvent.data.num ?? 2) + 1 },
+        },
+      };
+    }
+    return {};
+  });
+
+  assert.match(runtime.source, /phaseDrawBegin2/);
+  assert.match(runtime.source, /ruleEvent/);
+});
