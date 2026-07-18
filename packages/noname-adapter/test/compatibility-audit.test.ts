@@ -15,7 +15,20 @@ const upstreamRoot = resolve(
 
 test("兼容审计统计固定上游 API 并明确标记未知能力", async () => {
   const report = await auditPinnedNonameApiUsage(upstreamRoot);
-  assert.ok(report.packCount >= 20);
+  assert.equal(report.packCount, 26);
+  assert.equal(report.usages.length, 604);
+  assert.deepEqual(report.summary, {
+    direct: 13,
+    shimmed: 53,
+    migrated: 41,
+    unsupported: 497,
+  });
+  assert.deepEqual(report.callSummary, {
+    direct: 2838,
+    shimmed: 17642,
+    migrated: 32249,
+    unsupported: 33123,
+  });
   assert.ok(report.usages.some((usage) => usage.api === "player.chooseTarget"));
   assert.ok(
     report.usages.some((usage) => usage.compatibility === "unsupported"),
@@ -29,10 +42,12 @@ test("兼容审计统计固定上游 API 并明确标记未知能力", async () 
 
 test("迁移分析区分已迁移效果和未支持调用", () => {
   const usage = analyzeNonameApiUsage(
-    `async function content() { await player.draw(2); game.broadcastAll(() => {}); Math.random(); }`,
+    `async function content() { await player.draw(2); evt.getParent(); game.broadcastAll(() => {}); Math.random(); }`,
   );
   assert.equal(usage.get("player.draw"), 1);
   assert.equal(compatibilityForApi("player.draw").compatibility, "migrated");
+  assert.equal(usage.get("event.getParent"), 1);
+  assert.equal(compatibilityForApi("event.getParent").compatibility, "shimmed");
   assert.equal(
     compatibilityForApi("game.broadcastAll").compatibility,
     "unsupported",

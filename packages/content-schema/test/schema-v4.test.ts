@@ -191,3 +191,33 @@ test("schema v4 validates isolated noname-compatible runtimes", () => {
     assert.ok(result.errors.some((item) => item.includes("10–5000ms")));
   }
 });
+
+test("advanced effects validate exact player IDs and mark removal", () => {
+  const value = packageV4();
+  value.skills[0].effects = [
+    {
+      type: "removeMark",
+      target: "selected",
+      targetPlayerId: "runtime-player-b",
+      mark: "bridge.test",
+      count: 1,
+    },
+    {
+      type: "moveCards",
+      target: "selected",
+      targetPlayerId: "runtime-player-b",
+      count: 1,
+      fromZone: "hand",
+      to: "selected",
+      toPlayerId: "runtime-player-c",
+      toZone: "hand",
+    },
+  ];
+  assert.equal(validatePackage(value).ok, true);
+
+  value.skills[0].effects[0].targetPlayerId = "x".repeat(129);
+  const result = validatePackage(value);
+  assert.equal(result.ok, false);
+  if (!result.ok)
+    assert.ok(result.errors.some((item) => item.includes("targetPlayerId")));
+});

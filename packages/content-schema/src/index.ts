@@ -404,6 +404,8 @@ function validateEffects(
         phase?: unknown;
         fromZone?: unknown;
         to?: unknown;
+        targetPlayerId?: unknown;
+        toPlayerId?: unknown;
         toZone?: unknown;
       };
       if (
@@ -412,6 +414,7 @@ function validateEffects(
           "recover",
           "damage",
           "addMark",
+          "removeMark",
           "discard",
           "judge",
           "if",
@@ -433,6 +436,20 @@ function validateEffects(
         )
       )
         errors.push(`${owner} 的节点 ${index + 1} 目标不合法`);
+      for (const [field, playerId] of [
+        ["targetPlayerId", node.targetPlayerId],
+        ["toPlayerId", node.toPlayerId],
+      ] as const) {
+        if (
+          playerId !== undefined &&
+          (typeof playerId !== "string" ||
+            playerId.length < 1 ||
+            playerId.length > 128)
+        )
+          errors.push(
+            `${owner} 的节点 ${index + 1} ${field} 必须是 1–128 字符的玩家 ID`,
+          );
+      }
       for (const [field, value] of [
         ["count", node.count],
         ["amount", node.amount],
@@ -445,7 +462,7 @@ function validateEffects(
             `${owner} 的节点 ${index + 1} ${field} 必须为 0–20 的整数`,
           );
       if (
-        node.type === "addMark" &&
+        (node.type === "addMark" || node.type === "removeMark") &&
         node.mark !== undefined &&
         (typeof node.mark !== "string" || !validId(node.mark))
       )
@@ -705,8 +722,7 @@ function validateRuntime(
     errors.push("高级运行时声明必须是对象");
     return;
   }
-  if (runtime.kind !== "noname-compat")
-    errors.push("高级运行时类型不受支持");
+  if (runtime.kind !== "noname-compat") errors.push("高级运行时类型不受支持");
   if (runtime.apiVersion !== "noname-compat/v1")
     errors.push("无名杀兼容 API 版本不受支持");
   if (!/^[a-f0-9]{40}$/i.test(runtime.upstreamCommit))

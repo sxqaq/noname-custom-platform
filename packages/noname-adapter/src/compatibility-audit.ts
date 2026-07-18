@@ -17,6 +17,7 @@ export interface NonameCompatibilityAudit {
   packCount: number;
   usages: NonameApiUsage[];
   summary: Record<NonameApiCompatibility, number>;
+  callSummary: Record<NonameApiCompatibility, number>;
 }
 
 const compatibility = new Map<
@@ -47,6 +48,46 @@ const compatibility = new Map<
   [
     "player.gainPlayerCard",
     { status: "shimmed", replacement: "player-choice/card" },
+  ],
+  [
+    "player.chooseButton",
+    { status: "shimmed", replacement: "player-choice/button" },
+  ],
+  [
+    "player.choosePlayerCard",
+    { status: "shimmed", replacement: "player-choice/card" },
+  ],
+  [
+    "player.discardPlayerCard",
+    { status: "shimmed", replacement: "player-choice/card" },
+  ],
+  [
+    "player.chooseUseTarget",
+    { status: "shimmed", replacement: "player-choice/card+target" },
+  ],
+  [
+    "player.chooseToCompare",
+    { status: "shimmed", replacement: "player-choice/compare" },
+  ],
+  [
+    "player.chooseToUse",
+    { status: "shimmed", replacement: "player-choice/card+target" },
+  ],
+  [
+    "player.chooseToRespond",
+    { status: "shimmed", replacement: "player-choice/card" },
+  ],
+  [
+    "player.chooseCardTarget",
+    { status: "shimmed", replacement: "player-choice/card+target" },
+  ],
+  [
+    "player.chooseDrawRecover",
+    { status: "shimmed", replacement: "player-choice/option" },
+  ],
+  [
+    "player.chooseControlList",
+    { status: "shimmed", replacement: "player-choice/option" },
   ],
   ["get.suit", { status: "shimmed", replacement: "结构化卡牌花色" }],
   ["get.translation", { status: "shimmed", replacement: "稳定 ID/显示文本" }],
@@ -99,6 +140,123 @@ const compatibility = new Map<
   ],
   ["player.gain", { status: "migrated", replacement: "effect.moveCards" }],
   ["player.discard", { status: "migrated", replacement: "effect.discard" }],
+  [
+    "player.addTempSkill",
+    { status: "migrated", replacement: "effect.grantSkill(turn)" },
+  ],
+  [
+    "player.addSkills",
+    { status: "migrated", replacement: "effect.grantSkill(game)" },
+  ],
+  [
+    "player.removeSkills",
+    { status: "migrated", replacement: "effect.removeSkill" },
+  ],
+  [
+    "player.removeMark",
+    { status: "migrated", replacement: "effect.removeMark" },
+  ],
+  [
+    "player.loseMaxHp",
+    { status: "migrated", replacement: "effect.changeMaxHp(-n)" },
+  ],
+  [
+    "player.gainMaxHp",
+    { status: "migrated", replacement: "effect.changeMaxHp(+n)" },
+  ],
+  ["player.drawTo", { status: "migrated", replacement: "effect.draw" }],
+  ["player.recoverTo", { status: "migrated", replacement: "effect.recover" }],
+  [
+    "player.awakenSkill",
+    { status: "migrated", replacement: "effect.addMark(awakened)" },
+  ],
+  ["player.skip", { status: "migrated", replacement: "effect.skipPhase" }],
+  ["player.hasCard", { status: "shimmed", replacement: "player proxy zones" }],
+  ["player.hasCards", { status: "shimmed", replacement: "player proxy zones" }],
+  ["player.getEquip", { status: "shimmed", replacement: "player equipment" }],
+  ["player.getEquips", { status: "shimmed", replacement: "player equipment" }],
+  ["player.getSkills", { status: "shimmed", replacement: "player skills" }],
+  ["player.getHp", { status: "shimmed", replacement: "player hp" }],
+  ["player.getDamagedHp", { status: "shimmed", replacement: "maxHp - hp" }],
+  ["player.isDamaged", { status: "shimmed", replacement: "hp < maxHp" }],
+  ["player.isHealthy", { status: "shimmed", replacement: "hp >= maxHp" }],
+  ["player.isIn", { status: "shimmed", replacement: "player alive" }],
+  [
+    "player.setStorage",
+    { status: "shimmed", replacement: "checkpointed runtime storage" },
+  ],
+  [
+    "player.markAuto",
+    { status: "shimmed", replacement: "checkpointed runtime storage" },
+  ],
+  [
+    "player.unmarkAuto",
+    { status: "shimmed", replacement: "checkpointed runtime storage" },
+  ],
+  ["player.getNext", { status: "shimmed", replacement: "seat order" }],
+  ["player.getPrevious", { status: "shimmed", replacement: "seat order" }],
+  ["player.logSkill", { status: "shimmed", replacement: "runtime logs" }],
+  ["player.markSkill", { status: "shimmed", replacement: "runtime logs" }],
+  ["player.unmarkSkill", { status: "shimmed", replacement: "runtime logs" }],
+  ["player.line", { status: "shimmed", replacement: "runtime logs" }],
+  ["player.popup", { status: "shimmed", replacement: "runtime logs" }],
+  ["player.chat", { status: "shimmed", replacement: "runtime logs" }],
+  [
+    "event.getParent",
+    { status: "shimmed", replacement: "serializable event parent graph" },
+  ],
+  [
+    "trigger.getParent",
+    { status: "shimmed", replacement: "serializable event parent graph" },
+  ],
+  [
+    "event.getTrigger",
+    { status: "shimmed", replacement: "serializable trigger link" },
+  ],
+  ["event.getl", { status: "shimmed", replacement: "structured loss history" }],
+  [
+    "trigger.getl",
+    { status: "shimmed", replacement: "structured loss history" },
+  ],
+  ["event.getg", { status: "shimmed", replacement: "structured gain history" }],
+  [
+    "trigger.getg",
+    { status: "shimmed", replacement: "structured gain history" },
+  ],
+  [
+    "event.getd",
+    { status: "shimmed", replacement: "structured discard history" },
+  ],
+  [
+    "trigger.getd",
+    { status: "shimmed", replacement: "structured discard history" },
+  ],
+  ["event.hasNature", { status: "shimmed", replacement: "event nature" }],
+  ["trigger.hasNature", { status: "shimmed", replacement: "event nature" }],
+  ["event.notLink", { status: "shimmed", replacement: "event linked flag" }],
+  ["trigger.notLink", { status: "shimmed", replacement: "event linked flag" }],
+  ["event.set", { status: "migrated", replacement: "event mutation journal" }],
+  [
+    "event.cancel",
+    { status: "migrated", replacement: "event mutation journal" },
+  ],
+  [
+    "trigger.cancel",
+    { status: "migrated", replacement: "event mutation journal" },
+  ],
+  [
+    "event.finish",
+    { status: "migrated", replacement: "event mutation journal" },
+  ],
+  ["event.goto", { status: "migrated", replacement: "event mutation journal" }],
+  [
+    "trigger.untrigger",
+    { status: "migrated", replacement: "event mutation journal" },
+  ],
+  [
+    "trigger.changeToZero",
+    { status: "migrated", replacement: "event mutation journal" },
+  ],
 ]);
 
 export async function auditPinnedNonameApiUsage(upstreamRoot: string) {
@@ -145,12 +303,22 @@ export async function auditPinnedNonameApiUsage(upstreamRoot: string) {
     migrated: 0,
     unsupported: 0,
   };
-  usages.forEach((usage) => summary[usage.compatibility]++);
+  const callSummary: NonameCompatibilityAudit["callSummary"] = {
+    direct: 0,
+    shimmed: 0,
+    migrated: 0,
+    unsupported: 0,
+  };
+  usages.forEach((usage) => {
+    summary[usage.compatibility]++;
+    callSummary[usage.compatibility] += usage.calls;
+  });
   return {
     generatedFrom: resolve(upstreamRoot),
     packCount: packs.length,
     usages,
     summary,
+    callSummary,
   } satisfies NonameCompatibilityAudit;
 }
 
@@ -169,6 +337,16 @@ export function analyzeNonameApiUsage(source: string) {
     "chooseTarget",
     "chooseToDiscard",
     "gainPlayerCard",
+    "chooseButton",
+    "choosePlayerCard",
+    "discardPlayerCard",
+    "chooseUseTarget",
+    "chooseToCompare",
+    "chooseToUse",
+    "chooseToRespond",
+    "chooseCardTarget",
+    "chooseDrawRecover",
+    "chooseControlList",
     "draw",
     "recover",
     "damage",
@@ -178,6 +356,14 @@ export function analyzeNonameApiUsage(source: string) {
     "removeSkill",
     "gain",
     "discard",
+    "addTempSkill",
+    "addSkills",
+    "removeSkills",
+    "removeMark",
+    "loseMaxHp",
+    "gainMaxHp",
+    "drawTo",
+    "recoverTo",
   ].join("|");
   const playerAliasPattern = new RegExp(
     `\\b(?!player\\b)[A-Za-z_$][\\w$]*\\s*\\.(${proxiedPlayerMethods})\\s*\\(`,
@@ -185,6 +371,29 @@ export function analyzeNonameApiUsage(source: string) {
   );
   for (const match of source.matchAll(playerAliasPattern)) {
     const api = `player.${match[1]}`;
+    result.set(api, (result.get(api) ?? 0) + 1);
+  }
+  const proxiedEventMethods = [
+    "getParent",
+    "getTrigger",
+    "getl",
+    "getg",
+    "getd",
+    "hasNature",
+    "notLink",
+    "set",
+    "cancel",
+    "finish",
+    "goto",
+    "untrigger",
+    "changeToZero",
+  ].join("|");
+  const eventAliasPattern = new RegExp(
+    `\\b(?!event\\b|trigger\\b)[A-Za-z_$][\\w$]*\\s*\\.(${proxiedEventMethods})\\s*\\(`,
+    "g",
+  );
+  for (const match of source.matchAll(eventAliasPattern)) {
+    const api = `event.${match[1]}`;
     result.set(api, (result.get(api) ?? 0) + 1);
   }
   return result;

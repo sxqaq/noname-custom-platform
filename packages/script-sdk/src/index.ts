@@ -109,6 +109,10 @@ export function defineRuntime<State = unknown>(
 
 /** 高级作者 SDK：构建可验证 DSL，不在服务器执行作者 JavaScript。 */
 export const effect = {
+  forPlayer: (playerId: string, value: EffectDto): EffectDto => ({
+    ...value,
+    targetPlayerId: playerId,
+  }),
   draw: (count = 1, target: EffectDto["target"] = "self"): EffectDto => ({
     type: "draw",
     count,
@@ -132,6 +136,11 @@ export const effect = {
     count = 1,
     target: EffectDto["target"] = "self",
   ): EffectDto => ({ type: "addMark", mark, count, target }),
+  removeMark: (
+    mark: string,
+    count = 1,
+    target: EffectDto["target"] = "self",
+  ): EffectDto => ({ type: "removeMark", mark, count, target }),
   judge: (
     successSuits: Array<"spade" | "heart" | "club" | "diamond">,
     success: EffectDto[],
@@ -199,16 +208,20 @@ export const effect = {
     options: {
       count?: number;
       from?: EffectDto["target"];
+      fromPlayerId?: string;
       fromZone?: NonNullable<EffectDto["fromZone"]>;
       to?: NonNullable<EffectDto["to"]>;
+      toPlayerId?: string;
       toZone?: NonNullable<EffectDto["toZone"]>;
     } = {},
   ): EffectDto => ({
     type: "moveCards",
     target: options.from ?? "selected",
+    targetPlayerId: options.fromPlayerId,
     count: options.count ?? 1,
     fromZone: options.fromZone ?? "own",
     to: options.to ?? "self",
+    toPlayerId: options.toPlayerId,
     toZone: options.toZone ?? "hand",
   }),
 };

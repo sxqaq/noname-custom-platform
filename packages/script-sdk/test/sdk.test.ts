@@ -116,3 +116,19 @@ test("SDK v2 builds condition and state flow without executable functions", () =
   assert.equal(plugin.content.skills[0].effects[1].type, "if");
   assert.doesNotMatch(JSON.stringify(plugin), /function/);
 });
+
+test("SDK addresses exact runtime players and removes marks declaratively", () => {
+  const remove = effect.forPlayer("player-b", effect.removeMark("charge", 2));
+  const move = effect.moveCards({
+    count: 1,
+    fromPlayerId: "player-b",
+    fromZone: "hand",
+    toPlayerId: "player-c",
+    toZone: "hand",
+  });
+
+  assert.equal(remove.targetPlayerId, "player-b");
+  assert.equal(remove.type, "removeMark");
+  assert.equal(move.targetPlayerId, "player-b");
+  assert.equal(move.toPlayerId, "player-c");
+});

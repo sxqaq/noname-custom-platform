@@ -46,6 +46,7 @@ export interface Effect {
     | "recover"
     | "damage"
     | "addMark"
+    | "removeMark"
     | "discard"
     | "judge"
     | "if"
@@ -62,6 +63,8 @@ export interface Effect {
   amount?: number;
   mark?: string;
   target: EffectTarget;
+  /** Advanced runtimes can address an exact authoritative player. */
+  targetPlayerId?: string;
   next?: string;
   successSuits?: Suit[];
   success?: Effect[];
@@ -78,6 +81,8 @@ export interface Effect {
   phase?: "judge" | "draw" | "play" | "discard" | "end";
   fromZone?: "hand" | "own";
   to?: RuleSubject;
+  /** Exact destination for advanced card-movement effects. */
+  toPlayerId?: string;
   toZone?: "hand" | "discard";
 }
 export interface SkillSelection {
@@ -1275,6 +1280,7 @@ export class HeadlessGame {
     sourceId = this.state.currentPlayerId,
     selectedId?: string,
     hookId = "external-mod",
+    selfId = sourceId,
   ) {
     if (this.state.status !== "playing") throw new Error("游戏已经结束");
     const stateBefore = structuredClone(this.state);
@@ -1283,11 +1289,12 @@ export class HeadlessGame {
     const suppressedBefore = new Set(this.suppressLianying);
     const before = this.state.sequence;
     try {
+      const self = this.player(selfId);
       const source = this.player(sourceId);
       const selected = selectedId ? this.player(selectedId) : undefined;
       this.applyEffects(
         structuredClone(effects),
-        source,
+        self,
         source,
         selected,
         hookId,
@@ -4625,8 +4632,12 @@ export class HeadlessGame {
             : (self.marks[key] ?? 0) + (effect.value ?? 0);
         continue;
       }
-      const targets =
-        effect.target === "allOthers"
+      const explicitTarget = effect.targetPlayerId
+        ? this.player(effect.targetPlayerId)
+        : undefined;
+      const targets = explicitTarget
+        ? [explicitTarget]
+        : effect.target === "allOthers"
           ? this.state.players.filter(
               (item) => item.alive && item.id !== self.id,
             )
@@ -4664,6 +4675,14 @@ export class HeadlessGame {
         if (effect.type === "addMark")
           target.marks[effect.mark ?? "mark"] =
             (target.marks[effect.mark ?? "mark"] ?? 0) + (effect.count ?? 1);
+        if (effect.type === "removeMark") {
+          const mark = effect.mark ?? "mark";
+          target.marks[mark] = Math.max(
+            0,
+            (target.marks[mark] ?? 0) - (effect.count ?? 1),
+          );
+          if (!target.marks[mark]) delete target.marks[mark];
+        }
         if (effect.type === "discard")
           this.discardRandom(target, effect.count ?? 1);
         if (effect.type === "loseHp") {
@@ -4685,12 +4704,9 @@ export class HeadlessGame {
         if (effect.type === "skipPhase" && effect.phase)
           target.marks[`skipPhase.${effect.phase}`] = 1;
         if (effect.type === "moveCards") {
-          const destination = this.ruleSubject(
-            effect.to ?? "self",
-            self,
-            source,
-            selected,
-          );
+          const destination = effect.toPlayerId
+            ? this.player(effect.toPlayerId)
+            : this.ruleSubject(effect.to ?? "self", self, source, selected);
           const count = Math.max(0, Math.min(20, effect.count ?? 1));
           for (let i = 0; i < count; i++) {
             const card =

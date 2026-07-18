@@ -156,6 +156,20 @@ const runtime = defineRuntime<{ calls: number }>(
 
 效果目标可以是 `self`、`source`、`selected` 或 `allOthers`。涉及所选目标时，技能必须先声明相应的选择步骤。
 
+高级运行时已知道权威玩家 ID 时，可以精确定位不同来源和去向：
+
+```ts
+effect.forPlayer("player-b", effect.removeMark("charge", 1));
+effect.moveCards({
+  fromPlayerId: "player-b",
+  fromZone: "hand",
+  toPlayerId: "player-c",
+  toZone: "hand",
+});
+```
+
+不存在的玩家 ID 会使当次权威效果批整体回滚。
+
 ### 选择 `selection`
 
 - `target`：选择角色，可限制自己、其他角色、任意角色或受伤角色；

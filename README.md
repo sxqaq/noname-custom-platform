@@ -133,7 +133,7 @@ npm.cmd run installer:win
 
 代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译并测试。普通能力生成规则 IR；复杂能力可用 `defineRuntime()` 进入房主的隔离权威运行时，远程玩家浏览器始终不执行作者源码。模板、命令和信任边界见 [插件 SDK](docs/plugin-sdk.md)。
 
-复用真实无名杀技能时，先运行 API 审计或迁移骨架命令；26 个官方技能包都能无 DOM 加载，但尚不能宣称全部技能可完整执行。当前分级与高频缺口见 [无名杀 API 兼容矩阵](docs/noname-api-matrix.md)。
+复用真实无名杀技能时，先运行 API 审计或迁移骨架命令；26 个官方技能包都能无 DOM 加载，但尚不能宣称全部技能可完整执行。当前分级与高频缺口见 [无名杀 API 兼容矩阵](docs/noname-api-matrix.md)，玩家代理、选择宿主和事件图见 [无名杀执行桥](docs/noname-execution-bridge.md)。
 
 插件有三种创作层级：
 
