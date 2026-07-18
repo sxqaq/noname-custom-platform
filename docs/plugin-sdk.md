@@ -163,6 +163,8 @@ const runtime = defineNonameSkillRuntime([
 
 异步内容可以直接使用 `await player.chooseBool()`、`chooseControl()`、`chooseTarget()`、`chooseCard()` 及 `.forResult()`。运行时不会序列化 JavaScript 调用栈，而是在选择点保存原始规则事件、确定性随机位置和已经确认的响应；收到外部输入后用同一输入从头重放到选择点，再继续余下逻辑。选择前产生的临时效果不会重复提交。
 
+无名杀常见的 `cost`/`content` 两阶段触发技也使用同一协议。`cost` 可以设置 `event.result`；取消或返回 `bool: false` 时不会执行 `content`，成功选择产生的 `event.targets`、`event.cards` 和 `event.cost_data` 会带入内容阶段。
+
 ```ts
 async content(_event, trigger, player) {
   const result = await player

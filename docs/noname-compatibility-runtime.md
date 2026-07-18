@@ -25,6 +25,7 @@
 - 开局期间的运行时错误会把房间从 `playing` 原子回滚到 `waiting`；广播和离线自动化只访问已经实际建立的权威对局。
 - `player-choice` 权限已接入目标、卡牌、选项、数字、花色五类交互；请求和响应均由服务器校验，待选择状态支持快照、断线重连、离线 AI、链式继续和无代码回放。
 - `defineNonameSkillRuntime()` 已把 `chooseBool/chooseControl/chooseTarget/chooseCard` 接入服务器权威规则事件：异步技能可暂停当前事件、跨快照恢复、继续后续扩展，并由普通房间回放还原已校验结果。
+- 无名杀式 `cost`/`content` 两阶段已经统一执行；固定上游的 `standard.stdshushen` 真实 `cost` 和 `content` 已通过隔离房间运行时、外部目标选择和权威效果测试。
 - `GameManager` 已在开局、玩家命令和离线 AI 命令后运行隔离钩子；返回效果经现有规则 Schema 校验，再由权威引擎原子应用。
 - `afterCommand` 输入包含完整只读命令、核心事件日志、实际操作者和首个目标；高级效果的 `self/selected` 由这些权威 ID 映射，并纳入输入哈希和确定性回放校验。
 - 核心命令或兼容 Mod 任一失败时，游戏状态、随机状态、命令日志和 Mod 检查点一起回滚；基础回放使用已锁定钩子输出，不重新执行作者源码。

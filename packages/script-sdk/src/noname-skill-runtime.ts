@@ -104,6 +104,10 @@ export interface NonameCompatEvent {
   targets: NonameCompatCollection<NonameCompatPlayer>;
   directHit: NonameCompatCollection<NonameCompatPlayer>;
   excluded: NonameCompatCollection<NonameCompatPlayer>;
+  skill?: string;
+  result?: NonameCompatChoiceResult & Record<string, unknown>;
+  cards?: NonameCompatCard[];
+  cost_data?: Record<string, unknown>;
   set(key: string, value: unknown): this;
   cancel(): this;
   untrigger(): this;
@@ -128,6 +132,19 @@ export interface NonameCompatGet {
   type(card: NonameCompatCard): string | undefined;
   type2(card: NonameCompatCard): string | undefined;
   translation(value: unknown): string;
+  prompt(skillId: string): string;
+  prompt2(skillId: string): string;
+  player(): NonameCompatPlayer | undefined;
+}
+
+export interface NonameCompatLib {
+  filter: {
+    notMe(
+      card: NonameCompatCard | undefined,
+      player: NonameCompatPlayer,
+      target: NonameCompatPlayer,
+    ): boolean;
+  };
 }
 
 declare global {
@@ -135,6 +152,8 @@ declare global {
   const game: NonameCompatGame;
   /** Available only inside content/filter passed to defineNonameSkillRuntime. */
   const get: NonameCompatGet;
+  /** Available only inside content/filter passed to defineNonameSkillRuntime. */
+  const lib: NonameCompatLib;
 }
 
 export interface NonameCompatSkillDefinition {
@@ -142,6 +161,11 @@ export interface NonameCompatSkillDefinition {
   trigger: NonameSkillTrigger | OneOrMany<NonameTriggerName>;
   forced?: boolean;
   filter?: (event: NonameCompatEvent, player: NonameCompatPlayer) => boolean;
+  cost?: (
+    event: NonameCompatEvent,
+    trigger: NonameCompatEvent,
+    player: NonameCompatPlayer,
+  ) => unknown;
   content: (
     event: NonameCompatEvent,
     trigger: NonameCompatEvent,
@@ -180,6 +204,7 @@ export function defineNonameSkillRuntime(
       trigger: normalizeTrigger(definition.trigger),
       forced: definition.forced === true,
       filter: definition.filter ? functionSource(definition.filter) : undefined,
+      cost: definition.cost ? functionSource(definition.cost) : undefined,
       content: functionSource(definition.content),
     };
   });
@@ -251,13 +276,14 @@ function createRuntimeSource(
     trigger: Record<string, NonameTriggerName[]>;
     forced: boolean;
     filter?: string;
+    cost?: string;
     content: string;
   }>,
 ) {
   const declarations = skills
     .map(
       (skill) =>
-        `{id:${JSON.stringify(skill.id)},trigger:${JSON.stringify(skill.trigger)},forced:${skill.forced},filter:${skill.filter ? `(${skill.filter})` : "undefined"},content:(${skill.content})}`,
+        `{id:${JSON.stringify(skill.id)},trigger:${JSON.stringify(skill.trigger)},forced:${skill.forced},filter:${skill.filter ? `(${skill.filter})` : "undefined"},cost:${skill.cost ? `(${skill.cost})` : "undefined"},content:(${skill.content})}`,
     )
     .join(",");
   return `async (input) => {
@@ -434,7 +460,10 @@ function createRuntimeSource(
       name(card) { return card && card.name; }, suit(card) { return card && card.suit; }, number(card) { return card && (card.number || card.rank); },
       color:cardColor, type(card) { return card && card.type; }, type2(card) { return card && card.type; },
       translation(value) { return value && value.name || String(value == null ? "" : value); },
+      prompt(skillId) { return "是否发动" + String(skillId || "该技能") + "？"; }, prompt2(skillId) { return this.prompt(skillId); },
+      player() { return playerProxy(raw.playerId); },
     };
+    const lib = {filter:{notMe(_card, player, target) { return !samePlayer(player, target); }}};
     const eventNames = (value) => Array.isArray(value) ? value : [];
     const roleMatches = (skill, owner) => {
       if (eventNames(skill.trigger.global).includes(raw.name)) return true;
@@ -450,7 +479,13 @@ function createRuntimeSource(
         const player = playerProxy(rawOwner.id);
         if (!roleMatches(skill, player)) continue;
         if (skill.filter && !(await skill.filter(trigger, player))) continue;
-        const event = {name:skill.id, player, getTrigger() { return trigger; }, getParent() { return trigger; }, set(key, value) { this[key] = value; return this; }};
+        let costResult;
+        const event = {name:skill.id, skill:skill.id, player, getTrigger() { return trigger; }, getParent() { return trigger; }, set(key, value) { this[key] = value; return this; }};
+        Object.defineProperty(event, "result", {enumerable:true, get() { return costResult; }, set(value) { costResult = value; if (value && typeof value === "object") Object.assign(event, value); }});
+        if (skill.cost) {
+          await skill.cost(event, trigger, player);
+          if (!event.result || event.result.bool === false) continue;
+        }
         await skill.content(event, trigger, player);
       }
     } catch (error) {
