@@ -18,6 +18,39 @@ import type {
 export const NONAME_COMPAT_UPSTREAM_COMMIT =
   "632d2d3c8da2893466a8c440a18861c9ed49813d";
 
+type RuntimeRuleEventBase<Name extends string, Data> = Readonly<{
+  id: string;
+  name: Name;
+  playerId: string;
+  data: Readonly<Data & Record<string, unknown>>;
+}>;
+
+export type RuntimeRuleEvent =
+  | RuntimeRuleEventBase<"phaseDrawBegin2", { num: number; numFixed?: boolean }>
+  | RuntimeRuleEventBase<
+      | "damageBegin1"
+      | "damageBegin2"
+      | "damageBegin3"
+      | "damageBegin4"
+      | "damageSource"
+      | "damageEnd",
+      {
+        num: number;
+        sourceId?: string;
+        targetId: string;
+        cardId?: string;
+      }
+    >
+  | RuntimeRuleEventBase<
+      "useCard" | "useCard1" | "useCard2",
+      {
+        cardId: string;
+        cardName: string;
+        sourceId: string;
+        targetIds: string[];
+      }
+    >;
+
 export interface RuntimeHookInput<State = unknown> {
   apiVersion: "noname-compat/v1";
   hook: "roomStart" | "afterCommand" | "choiceResponse" | "ruleEvent";
@@ -50,19 +83,7 @@ export interface RuntimeHookInput<State = unknown> {
       numberValue?: number;
       suit?: "spade" | "heart" | "club" | "diamond";
     };
-    ruleEvent?: Readonly<{
-      id: string;
-      name:
-        | "phaseDrawBegin2"
-        | "damageBegin1"
-        | "damageBegin2"
-        | "damageBegin3"
-        | "damageBegin4"
-        | "damageSource"
-        | "damageEnd";
-      playerId: string;
-      data: Readonly<Record<string, unknown>>;
-    }>;
+    ruleEvent?: RuntimeRuleEvent;
   };
 }
 

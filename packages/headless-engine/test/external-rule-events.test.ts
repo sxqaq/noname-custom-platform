@@ -13,6 +13,7 @@ const pack: ContentPackage = {
   generals: [
     { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
     { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_c", name: "Blank C", faction: "qun", hp: 4, skills: [] },
   ],
   skills: [],
 };
@@ -232,4 +233,154 @@ test("effect batches continue after every serialized damage interrupt", () => {
 
   assert.equal(target.hp, before - 2);
   assert.equal(target.marks.finished, 1);
+});
+
+const threePlayerConfig: GameConfig = {
+  ...config,
+  players: [
+    { id: "a", name: "A" },
+    { id: "b", name: "B" },
+    { id: "c", name: "C" },
+  ],
+};
+
+function enterPlay(game: HeadlessGame) {
+  const event = game.externalRuleEvent();
+  assert.equal(event?.name, "phaseDrawBegin2");
+  game.resumeExternalRuleEvent({ eventId: event!.id });
+}
+
+function giveDeckCard(game: HeadlessGame, playerId: string, name: string) {
+  const index = game.state.deck.findIndex((card) => card.name === name);
+  assert.notEqual(index, -1);
+  const card = game.state.deck.splice(index, 1)[0];
+  game.state.players.find((player) => player.id === playerId)!.hand.push(card);
+  return card;
+}
+
+test("use-card events can retarget a card before authoritative validation", () => {
+  const game = HeadlessGame.create(threePlayerConfig);
+  enterPlay(game);
+  const card = giveDeckCard(game, "a", "sha");
+  game.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: card.id,
+    targetId: "b",
+  });
+  const stages: string[] = [];
+
+  while (game.externalRuleEvent()) {
+    const event = game.externalRuleEvent()!;
+    stages.push(event.name);
+    game.resumeExternalRuleEvent({
+      eventId: event.id,
+      data: event.name === "useCard" ? { targetIds: ["c"] } : undefined,
+    });
+  }
+
+  assert.deepEqual(stages, ["useCard", "useCard1", "useCard2"]);
+  assert.equal(game.state.pending?.kind, "shan");
+  assert.equal(game.state.pending?.playerId, "c");
+});
+
+test("use-card events can replace the effective card name", () => {
+  const game = HeadlessGame.create(threePlayerConfig);
+  enterPlay(game);
+  const card = giveDeckCard(game, "a", "tao");
+  game.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: card.id,
+    targetId: "b",
+  });
+
+  while (game.externalRuleEvent()) {
+    const event = game.externalRuleEvent()!;
+    game.resumeExternalRuleEvent({
+      eventId: event.id,
+      data:
+        event.name === "useCard"
+          ? { cardName: "sha", targetIds: ["b"] }
+          : undefined,
+    });
+  }
+
+  assert.equal(game.state.pending?.kind, "shan");
+  assert.equal(game.state.pending?.playerId, "b");
+  assert.equal(
+    game.state.discard.some((item) => item.id === card.id),
+    true,
+  );
+});
+
+test("cancelling a use-card event consumes the physical card and resumes play", () => {
+  const game = HeadlessGame.create(threePlayerConfig);
+  enterPlay(game);
+  const card = giveDeckCard(game, "a", "sha");
+  game.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: card.id,
+    targetId: "b",
+  });
+  game.resumeExternalRuleEvent({ eventId: game.externalRuleEvent()!.id });
+  const event = game.externalRuleEvent()!;
+
+  game.resumeExternalRuleEvent({ eventId: event.id, cancelled: true });
+
+  assert.equal(game.externalRuleEvent(), undefined);
+  assert.equal(game.state.pending, undefined);
+  assert.equal(game.state.phase, "play");
+  assert.equal(
+    game.state.discard.some((item) => item.id === card.id),
+    true,
+  );
+});
+
+test("use-card event identity fields are immutable and roll back atomically", () => {
+  const game = HeadlessGame.create(threePlayerConfig);
+  enterPlay(game);
+  const card = giveDeckCard(game, "a", "sha");
+  game.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: card.id,
+    targetId: "b",
+  });
+  const event = game.externalRuleEvent()!;
+  const before = game.snapshot();
+
+  assert.throws(
+    () =>
+      game.resumeExternalRuleEvent({
+        eventId: event.id,
+        data: { cardId: "forged" },
+      }),
+    /physical card ID/,
+  );
+  assert.equal(game.snapshot(), before);
+});
+
+test("use-card event checkpoints resume deterministically", () => {
+  const first = HeadlessGame.create(threePlayerConfig);
+  enterPlay(first);
+  const card = giveDeckCard(first, "a", "sha");
+  first.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: card.id,
+    targetId: "b",
+  });
+  first.resumeExternalRuleEvent({ eventId: first.externalRuleEvent()!.id });
+  const second = HeadlessGame.restore(first.snapshot(), [pack]);
+
+  for (const game of [first, second]) {
+    while (game.externalRuleEvent()) {
+      const event = game.externalRuleEvent()!;
+      game.resumeExternalRuleEvent({ eventId: event.id });
+    }
+  }
+
+  assert.equal(second.snapshot(), first.snapshot());
 });

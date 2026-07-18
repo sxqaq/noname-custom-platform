@@ -35,7 +35,7 @@ effect.moveCards({
 
 ## 尚未完成
 
-- `phaseDrawBegin2` 以及 `damageBegin1/2/3/4 → damageSource → damageEnd` 已完成“引擎暂停 → 隔离 Mod 修改/取消 → 引擎验证恢复 → 快照/回放”纵切；用牌、濒死、判定和其余阶段中断点尚未接入。
+- `phaseDrawBegin2`、`useCard/useCard1/useCard2` 以及 `damageBegin1/2/3/4 → damageSource → damageEnd` 已完成“引擎暂停 → 隔离 Mod 修改/取消 → 引擎验证恢复 → 快照/基础回放”纵切；用牌目标逐个事件、濒死、判定和其余阶段中断点尚未接入。
 - 完整的扩展区、全局历史和事件牌移动模型。
 - 与规则无关的 AI 估值、动画和客户端广播兼容层。
 

@@ -256,3 +256,71 @@ test("afterCommand Mod 造成的伤害事件会被排空并无代码回放", asy
     target.hp,
   );
 });
+
+test("高级 Mod 可在局域网权威路径修改并取消用牌事件", async () => {
+  const manager = new GameManager();
+  const state = room();
+  const pack = runtimePack(`(input) => {
+    const event = input.context.ruleEvent;
+    if (input.hook === "ruleEvent" && event?.name === "useCard") {
+      return { ruleEvent: { data: { targetIds: [event.data.sourceId === "a" ? "b" : "a"] } } };
+    }
+    if (input.hook === "ruleEvent" && event?.name === "useCard1") {
+      return { ruleEvent: { cancelled: true } };
+    }
+    return {};
+  }`);
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  await manager.start(state, [pack]);
+
+  while (true) {
+    const pending = state.players
+      .map((player) => manager.view(state.id, player.id).pending)
+      .find((item) => item?.kind === "selectGeneral");
+    if (!pending || pending.kind !== "selectGeneral") break;
+    await manager.action(state.id, pending.playerId, {
+      action: "chooseGeneral",
+      generalId: pending.choices[0].id,
+    });
+  }
+
+  const publicView = manager.view(state.id, "a");
+  const sourceId = publicView.currentPlayerId;
+  const sourceView = manager.view(state.id, sourceId);
+  const source = sourceView.players.find((player) => player.id === sourceId)!;
+  const card = source.hand?.find(
+    (item) => item.name !== "shan" && item.name !== "wuxie",
+  );
+  assert.ok(card, "deterministic fixture must offer a proactive card");
+  const beforeHand = source.handCount;
+  await manager.action(state.id, sourceId, {
+    action: "useCard",
+    cardId: card.id,
+    targetId: sourceId === "a" ? "b" : "a",
+  });
+
+  const after = manager.view(state.id, sourceId);
+  assert.equal(
+    after.players.find((player) => player.id === sourceId)?.handCount,
+    beforeHand - 1,
+  );
+  assert.equal(after.pending, undefined);
+  const replay = manager.listReplays()[0];
+  assert.deepEqual(
+    replay.compatHooks
+      ?.filter(
+        (record) =>
+          record.hook === "ruleEvent" &&
+          record.context.ruleEvent?.name.startsWith("useCard"),
+      )
+      .map((record) => record.context.ruleEvent?.name),
+    ["useCard", "useCard1"],
+  );
+  assert.equal(
+    manager.replay(replay.id, replay.commands.length).view.sequence,
+    after.sequence,
+  );
+});
