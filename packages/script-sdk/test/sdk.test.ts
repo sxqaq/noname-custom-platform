@@ -151,3 +151,21 @@ test("SDK types authoritative draw-rule event patches", () => {
   assert.match(runtime.source, /phaseDrawBegin2/);
   assert.match(runtime.source, /ruleEvent/);
 });
+
+test("SDK exposes the authoritative damage event chain", () => {
+  const runtime = defineRuntime((input) => {
+    if (
+      input.hook === "ruleEvent" &&
+      input.context.ruleEvent?.name === "damageBegin3"
+    ) {
+      return {
+        ruleEvent: {
+          data: { num: Number(input.context.ruleEvent.data.num ?? 1) + 1 },
+        },
+      };
+    }
+    return {};
+  });
+
+  assert.match(runtime.source, /damageBegin3/);
+});

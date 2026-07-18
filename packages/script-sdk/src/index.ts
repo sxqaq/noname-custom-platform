@@ -52,7 +52,14 @@ export interface RuntimeHookInput<State = unknown> {
     };
     ruleEvent?: Readonly<{
       id: string;
-      name: "phaseDrawBegin2";
+      name:
+        | "phaseDrawBegin2"
+        | "damageBegin1"
+        | "damageBegin2"
+        | "damageBegin3"
+        | "damageBegin4"
+        | "damageSource"
+        | "damageEnd";
       playerId: string;
       data: Readonly<Record<string, unknown>>;
     }>;

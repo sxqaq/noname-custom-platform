@@ -108,3 +108,128 @@ test("snapshots created before rule events restore with safe defaults", () => {
   assert.equal(restored.state.ruleEventSequence, 0);
   assert.equal(restored.externalRuleEvent(), undefined);
 });
+
+function startDamage(game: HeadlessGame, amount = 1) {
+  game.applyExternalEffects(
+    [{ type: "damage", target: "selected", amount }],
+    "a",
+    "b",
+    "test.damage",
+  );
+}
+
+test("damage runs through the complete authoritative pre/post event chain", () => {
+  const game = HeadlessGame.create(config);
+  game.resumeExternalRuleEvent({ eventId: game.externalRuleEvent()!.id });
+  const target = game.state.players.find((item) => item.id === "b")!;
+  const before = target.hp;
+  startDamage(game);
+  const stages: string[] = [];
+
+  while (game.externalRuleEvent()) {
+    const event = game.externalRuleEvent()!;
+    stages.push(event.name);
+    game.resumeExternalRuleEvent({
+      eventId: event.id,
+      data:
+        event.name === "damageBegin3"
+          ? { num: Number(event.data.num) + 1 }
+          : undefined,
+    });
+  }
+
+  assert.deepEqual(stages, [
+    "damageBegin1",
+    "damageBegin2",
+    "damageBegin3",
+    "damageBegin4",
+    "damageSource",
+    "damageEnd",
+  ]);
+  assert.equal(target.hp, before - 2);
+});
+
+test("pre-damage cancellation resumes without changing health", () => {
+  const game = HeadlessGame.create(config);
+  game.resumeExternalRuleEvent({ eventId: game.externalRuleEvent()!.id });
+  const target = game.state.players.find((item) => item.id === "b")!;
+  const before = target.hp;
+  startDamage(game);
+
+  while (game.externalRuleEvent()?.name !== "damageBegin4") {
+    const event = game.externalRuleEvent()!;
+    game.resumeExternalRuleEvent({ eventId: event.id });
+  }
+  const finalPreEvent = game.externalRuleEvent()!;
+  game.resumeExternalRuleEvent({
+    eventId: finalPreEvent.id,
+    cancelled: true,
+  });
+
+  assert.equal(target.hp, before);
+  assert.equal(game.externalRuleEvent(), undefined);
+});
+
+test("resolved post-damage events reject mutation atomically", () => {
+  const game = HeadlessGame.create(config);
+  game.resumeExternalRuleEvent({ eventId: game.externalRuleEvent()!.id });
+  startDamage(game);
+  while (game.externalRuleEvent()?.name !== "damageSource") {
+    const event = game.externalRuleEvent()!;
+    game.resumeExternalRuleEvent({ eventId: event.id });
+  }
+  const before = game.snapshot();
+  const event = game.externalRuleEvent()!;
+
+  assert.throws(
+    () =>
+      game.resumeExternalRuleEvent({
+        eventId: event.id,
+        data: { num: Number(event.data.num) + 1 },
+      }),
+    /cannot change/,
+  );
+  assert.equal(game.snapshot(), before);
+});
+
+test("damage event chains restore and resume deterministically mid-flight", () => {
+  const first = HeadlessGame.create(config);
+  first.resumeExternalRuleEvent({ eventId: first.externalRuleEvent()!.id });
+  startDamage(first, 2);
+  first.resumeExternalRuleEvent({ eventId: first.externalRuleEvent()!.id });
+  const second = HeadlessGame.restore(first.snapshot(), [pack]);
+
+  for (const game of [first, second]) {
+    while (game.externalRuleEvent()) {
+      const event = game.externalRuleEvent()!;
+      game.resumeExternalRuleEvent({ eventId: event.id });
+    }
+  }
+
+  assert.equal(second.snapshot(), first.snapshot());
+});
+
+test("effect batches continue after every serialized damage interrupt", () => {
+  const game = HeadlessGame.create(config);
+  game.resumeExternalRuleEvent({ eventId: game.externalRuleEvent()!.id });
+  const target = game.state.players.find((item) => item.id === "b")!;
+  const before = target.hp;
+  game.applyExternalEffects(
+    [
+      { type: "damage", target: "selected", amount: 1 },
+      { type: "damage", target: "selected", amount: 1 },
+      { type: "addMark", target: "selected", mark: "finished", count: 1 },
+    ],
+    "a",
+    "b",
+    "test.damage-batch",
+  );
+
+  while (game.externalRuleEvent()) {
+    const event = game.externalRuleEvent()!;
+    game.resumeExternalRuleEvent({ eventId: event.id });
+  }
+
+  assert.equal(target.hp, before - 2);
+  assert.equal(target.marks.finished, 1);
+});

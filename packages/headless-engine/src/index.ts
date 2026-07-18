@@ -173,9 +173,17 @@ export interface Card {
   /** Effective delayed-trick name while this physical card is in judgment. */
   virtualName?: string;
 }
+export type ExternalRuleEventName =
+  | "phaseDrawBegin2"
+  | "damageBegin1"
+  | "damageBegin2"
+  | "damageBegin3"
+  | "damageBegin4"
+  | "damageSource"
+  | "damageEnd";
 export interface ExternalRuleEvent {
   id: string;
-  name: "phaseDrawBegin2";
+  name: ExternalRuleEventName;
   playerId: string;
   data: Record<string, unknown>;
 }
@@ -422,7 +430,27 @@ export type PendingResponse =
       playerId: string;
       kind: "externalRuleEvent";
       event: ExternalRuleEvent;
-      continuation: { kind: "draw" };
+      continuation:
+        | { kind: "draw" }
+        | {
+            kind: "damage";
+            stage: Exclude<ExternalRuleEventName, "phaseDrawBegin2">;
+            sourceId?: string;
+            targetId: string;
+            amount: number;
+            resumePhase: "play";
+            resumePending?: PendingResponse;
+            causeCardId?: string;
+          };
+    }
+  | {
+      playerId: string;
+      kind: "effectContinuation";
+      effects: Effect[];
+      sourceId?: string;
+      selectedId?: string;
+      skillId?: string;
+      resumePhase: GameState["phase"];
     }
   | {
       playerId: string;
@@ -1277,14 +1305,19 @@ export class HeadlessGame {
       if (resolution.eventId !== pending.event.id)
         throw new Error("Authoritative rule event ID does not match");
       const num = resolution.data?.num ?? pending.event.data.num;
-      if (!Number.isInteger(num) || Number(num) < 0 || Number(num) > 20)
-        throw new Error(
-          "Rule event draw count must be an integer from 0 to 20",
-        );
+      const max = pending.event.name === "phaseDrawBegin2" ? 20 : 100;
+      if (!Number.isInteger(num) || Number(num) < 0 || Number(num) > max)
+        throw new Error(`Rule event count must be an integer from 0 to ${max}`);
       delete this.state.pending;
       if (pending.continuation.kind === "draw")
         this.continueDrawPhase(
           this.player(pending.playerId),
+          Number(num),
+          resolution.cancelled === true || resolution.data?.cancelled === true,
+        );
+      else
+        this.continueDamageRuleEvent(
+          pending.continuation,
           Number(num),
           resolution.cancelled === true || resolution.data?.cancelled === true,
         );
@@ -3820,11 +3853,130 @@ export class HeadlessGame {
     causeCardId?: string,
   ) {
     const actualAmount = amount + (source?.marks.luoyi ? 1 : 0);
-    target.hp -= actualAmount;
-    this.log(
-      "damage",
-      `${target.name}受到${source?.name ?? "无来源"}造成的${actualAmount}点伤害`,
+    if (this.state.externalRuleEvents) {
+      this.queueDamageRuleEvent("damageBegin1", {
+        kind: "damage",
+        stage: "damageBegin1",
+        sourceId: source?.id,
+        targetId: target.id,
+        amount: actualAmount,
+        resumePhase,
+        resumePending,
+        causeCardId,
+      });
+      return;
+    }
+    this.finishDamage(
+      source,
+      target,
+      actualAmount,
+      resumePhase,
+      resumePending,
+      causeCardId,
     );
+  }
+  private queueDamageRuleEvent(
+    stage: Exclude<ExternalRuleEventName, "phaseDrawBegin2">,
+    continuation: Extract<
+      Extract<PendingResponse, { kind: "externalRuleEvent" }>["continuation"],
+      { kind: "damage" }
+    >,
+  ) {
+    const event: ExternalRuleEvent = {
+      id: `rule-${++this.state.ruleEventSequence!}`,
+      name: stage,
+      playerId: continuation.targetId,
+      data: {
+        num: continuation.amount,
+        sourceId: continuation.sourceId,
+        targetId: continuation.targetId,
+        cardId: continuation.causeCardId,
+      },
+    };
+    this.state.pending = {
+      playerId: continuation.targetId,
+      kind: "externalRuleEvent",
+      event,
+      continuation: { ...structuredClone(continuation), stage },
+    };
+  }
+  private continueDamageRuleEvent(
+    continuation: Extract<
+      Extract<PendingResponse, { kind: "externalRuleEvent" }>["continuation"],
+      { kind: "damage" }
+    >,
+    amount: number,
+    cancelled: boolean,
+  ) {
+    const preDamageStages = [
+      "damageBegin1",
+      "damageBegin2",
+      "damageBegin3",
+      "damageBegin4",
+    ] as const;
+    const preIndex = preDamageStages.indexOf(
+      continuation.stage as (typeof preDamageStages)[number],
+    );
+    if (preIndex >= 0) {
+      if (cancelled || amount === 0) {
+        this.log(
+          "damage.cancelled",
+          `${this.player(continuation.targetId).name}的伤害被取消`,
+        );
+        this.resumeState(continuation.resumePending, continuation.resumePhase);
+        return;
+      }
+      const next = preDamageStages[preIndex + 1];
+      if (next) {
+        this.queueDamageRuleEvent(next, { ...continuation, amount });
+        return;
+      }
+      const source = continuation.sourceId
+        ? this.player(continuation.sourceId, false)
+        : undefined;
+      const target = this.player(continuation.targetId);
+      target.hp -= amount;
+      this.log(
+        "damage",
+        `${target.name}受到${source?.name ?? "无来源"}造成的${amount}点伤害`,
+      );
+      this.queueDamageRuleEvent("damageSource", { ...continuation, amount });
+      return;
+    }
+    if (amount !== continuation.amount || cancelled)
+      throw new Error("Resolved damage events cannot change or cancel damage");
+    if (continuation.stage === "damageSource") {
+      this.queueDamageRuleEvent("damageEnd", continuation);
+      return;
+    }
+    this.finishDamage(
+      continuation.sourceId
+        ? this.player(continuation.sourceId, false)
+        : undefined,
+      this.player(continuation.targetId),
+      continuation.amount,
+      continuation.resumePhase,
+      continuation.resumePending,
+      continuation.causeCardId,
+      true,
+    );
+  }
+  private finishDamage(
+    source: PlayerState | undefined,
+    target: PlayerState,
+    actualAmount: number,
+    resumePhase: "play",
+    resumePending?: PendingResponse,
+    causeCardId?: string,
+    alreadyApplied = false,
+  ) {
+    if (!alreadyApplied) {
+      target.hp -= actualAmount;
+      this.log(
+        "damage",
+        `${target.name}受到${source?.name ?? "无来源"}造成的${actualAmount}点伤害`,
+      );
+    }
     this.trigger("afterDamage", target, source);
     let postDamagePending = resumePending;
     if (target.general.skills.includes("yiji")) {
@@ -4094,6 +4246,19 @@ export class HeadlessGame {
     pending: PendingResponse | undefined,
     phase: GameState["phase"],
   ) {
+    if (pending?.kind === "effectContinuation") {
+      this.state.pending = undefined;
+      this.state.phase = pending.resumePhase;
+      this.applyEffects(
+        pending.effects,
+        this.player(pending.playerId),
+        pending.sourceId ? this.player(pending.sourceId, false) : undefined,
+        pending.selectedId ? this.player(pending.selectedId, false) : undefined,
+        pending.skillId,
+      );
+      if (!this.state.pending) this.state.phase = pending.resumePhase;
+      return;
+    }
     if (pending?.kind === "phaseContinuation") {
       this.state.pending = undefined;
       const player = this.player(pending.playerId, false);
@@ -4747,7 +4912,8 @@ export class HeadlessGame {
                   ? selected
                   : self,
             ].filter(Boolean) as PlayerState[]);
-      for (const target of targets) {
+      for (let targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+        const target = targets[targetIndex];
         if (effect.type === "judge") {
           this.startJudgment(target, {
             kind: "custom",
@@ -4768,8 +4934,31 @@ export class HeadlessGame {
         if (effect.type === "recover")
           target.hp = Math.min(target.maxHp, target.hp + (effect.amount ?? 1));
         if (effect.type === "damage") {
-          this.damage(source ?? self, target, effect.amount ?? 1, "play");
-          if (this.state.pending?.kind === "dying") return;
+          const continuation = this.state.externalRuleEvents
+            ? {
+                playerId: self.id,
+                kind: "effectContinuation" as const,
+                effects: [
+                  ...targets.slice(targetIndex + 1).map((remainingTarget) => ({
+                    ...structuredClone(effect),
+                    targetPlayerId: remainingTarget.id,
+                  })),
+                  ...structuredClone(effects.slice(effectIndex + 1)),
+                ],
+                sourceId: source?.id,
+                selectedId: selected?.id,
+                skillId,
+                resumePhase: this.state.phase,
+              }
+            : undefined;
+          this.damage(
+            source ?? self,
+            target,
+            effect.amount ?? 1,
+            "play",
+            continuation?.effects.length ? continuation : undefined,
+          );
+          if (this.state.pending?.kind === "dying" || continuation) return;
         }
         if (effect.type === "addMark")
           target.marks[effect.mark ?? "mark"] =
