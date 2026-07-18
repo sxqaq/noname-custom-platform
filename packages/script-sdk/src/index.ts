@@ -42,12 +42,21 @@ export type RuntimeRuleEvent =
       }
     >
   | RuntimeRuleEventBase<
-      "useCard" | "useCard1" | "useCard2",
+      | "useCard"
+      | "useCard1"
+      | "useCard2"
+      | "useCardToTarget"
+      | "useCardToPlayered"
+      | "useCardToTargeted",
       {
         cardId: string;
         cardName: string;
         sourceId: string;
         targetIds: string[];
+        targetId?: string;
+        targetIndex?: number;
+        directHitTargetIds: string[];
+        excludedTargetIds: string[];
       }
     >;
 

@@ -16,6 +16,8 @@ import {
   type NonameCompatPendingChoice,
 } from "./noname-compat-room.js";
 
+const MAX_INTERNAL_RULE_EVENTS_PER_COMMAND = 256;
+
 interface RunningGame {
   game: HeadlessGame;
   compat: NonameCompatRoomRuntime;
@@ -348,7 +350,7 @@ export class GameManager {
   }
 
   private async drainRuleEvents(running: RunningGame, commandIndex?: number) {
-    for (let count = 0; count < 64; count++) {
+    for (let count = 0; count < MAX_INTERNAL_RULE_EVENTS_PER_COMMAND; count++) {
       const event = running.game.externalRuleEvent();
       if (!event) return;
       const resolution = await running.compat.runRuleEvent(
@@ -358,7 +360,7 @@ export class GameManager {
       );
       running.game.resumeExternalRuleEvent(resolution);
     }
-    throw new Error("单次命令触发的内部规则事件超过 64 个");
+    throw new Error("单次命令触发的内部规则事件超过 256 个");
   }
 
   private replayRuleEvents(
@@ -367,7 +369,7 @@ export class GameManager {
     records: NonameCompatHookRecord[],
     commandIndex?: number,
   ) {
-    for (let count = 0; count < 64; count++) {
+    for (let count = 0; count < MAX_INTERNAL_RULE_EVENTS_PER_COMMAND; count++) {
       const event = game.externalRuleEvent();
       if (!event) return;
       let data = structuredClone(event.data);
@@ -391,7 +393,7 @@ export class GameManager {
       }
       game.resumeExternalRuleEvent({ eventId: event.id, data, cancelled });
     }
-    throw new Error("回放中的内部规则事件超过 64 个");
+    throw new Error("回放中的内部规则事件超过 256 个");
   }
 }
 

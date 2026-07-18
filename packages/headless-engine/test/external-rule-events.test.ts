@@ -279,7 +279,14 @@ test("use-card events can retarget a card before authoritative validation", () =
     });
   }
 
-  assert.deepEqual(stages, ["useCard", "useCard1", "useCard2"]);
+  assert.deepEqual(stages, [
+    "useCard",
+    "useCard1",
+    "useCard2",
+    "useCardToTarget",
+    "useCardToPlayered",
+    "useCardToTargeted",
+  ]);
   assert.equal(game.state.pending?.kind, "shan");
   assert.equal(game.state.pending?.playerId, "c");
 });
@@ -383,4 +390,112 @@ test("use-card event checkpoints resume deterministically", () => {
   }
 
   assert.equal(second.snapshot(), first.snapshot());
+});
+
+test("directHit bypasses a sha response while excluded removes a target", () => {
+  const direct = HeadlessGame.create(threePlayerConfig);
+  enterPlay(direct);
+  const directTarget = direct.state.players.find(
+    (player) => player.id === "b",
+  )!;
+  const directBefore = directTarget.hp;
+  const directCard = giveDeckCard(direct, "a", "sha");
+  direct.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: directCard.id,
+    targetId: "b",
+  });
+  while (direct.externalRuleEvent()) {
+    const event = direct.externalRuleEvent()!;
+    direct.resumeExternalRuleEvent({
+      eventId: event.id,
+      data:
+        event.name === "useCard2" ? { directHitTargetIds: ["b"] } : undefined,
+    });
+  }
+  assert.equal(directTarget.hp, directBefore - 1);
+  assert.notEqual(direct.state.pending?.kind, "shan");
+
+  const excluded = HeadlessGame.create(threePlayerConfig);
+  enterPlay(excluded);
+  const excludedTarget = excluded.state.players.find(
+    (player) => player.id === "b",
+  )!;
+  const excludedBefore = excludedTarget.hp;
+  const excludedCard = giveDeckCard(excluded, "a", "sha");
+  excluded.dispatch({
+    type: "useCard",
+    playerId: "a",
+    cardId: excludedCard.id,
+    targetId: "b",
+  });
+  while (excluded.externalRuleEvent()) {
+    const event = excluded.externalRuleEvent()!;
+    excluded.resumeExternalRuleEvent({
+      eventId: event.id,
+      data:
+        event.name === "useCard2" ? { excludedTargetIds: ["b"] } : undefined,
+    });
+  }
+  assert.equal(excludedTarget.hp, excludedBefore);
+  assert.equal(excluded.state.pending, undefined);
+  assert.equal(
+    excluded.state.discard.some((card) => card.id === excludedCard.id),
+    true,
+  );
+});
+
+test("directHit and excluded apply to separate targets of a group trick", () => {
+  const game = HeadlessGame.create(threePlayerConfig);
+  enterPlay(game);
+  const b = game.state.players.find((player) => player.id === "b")!;
+  const c = game.state.players.find((player) => player.id === "c")!;
+  const beforeB = b.hp;
+  const beforeC = c.hp;
+  const card = giveDeckCard(game, "a", "nanman");
+  game.dispatch({ type: "useCard", playerId: "a", cardId: card.id });
+
+  while (game.externalRuleEvent()) {
+    const event = game.externalRuleEvent()!;
+    game.resumeExternalRuleEvent({
+      eventId: event.id,
+      data:
+        event.name === "useCardToTarget" && event.data.targetId === "b"
+          ? { directHitTargetIds: ["b"] }
+          : event.name === "useCardToTarget" && event.data.targetId === "c"
+            ? { excludedTargetIds: ["c"] }
+            : undefined,
+    });
+  }
+
+  assert.equal(b.hp, beforeB - 1);
+  assert.equal(c.hp, beforeC);
+  assert.equal(game.state.pending, undefined);
+});
+
+test("group tricks honor a Mod-provided target subset and order", () => {
+  const game = HeadlessGame.create(threePlayerConfig);
+  enterPlay(game);
+  const b = game.state.players.find((player) => player.id === "b")!;
+  const c = game.state.players.find((player) => player.id === "c")!;
+  const beforeB = b.hp;
+  const beforeC = c.hp;
+  const card = giveDeckCard(game, "a", "nanman");
+  game.dispatch({ type: "useCard", playerId: "a", cardId: card.id });
+
+  while (game.externalRuleEvent()) {
+    const event = game.externalRuleEvent()!;
+    game.resumeExternalRuleEvent({
+      eventId: event.id,
+      data:
+        event.name === "useCard2"
+          ? { targetIds: ["c"], directHitTargetIds: ["c"] }
+          : undefined,
+    });
+  }
+
+  assert.equal(b.hp, beforeB);
+  assert.equal(c.hp, beforeC - 1);
+  assert.equal(game.state.pending, undefined);
 });

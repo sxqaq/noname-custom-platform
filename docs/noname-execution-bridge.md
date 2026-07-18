@@ -6,7 +6,7 @@
 
 1. `NonameEffectBridge`：向上游技能暴露受限玩家代理，只输出结构化 `Effect[]`。权威引擎验证数量、玩家 ID 和字段后原子应用。
 2. `NonameInteractionHost`：将 `choose*` 事件转换为可序列化请求，只允许指定玩家回答，并记录请求/结果日志。
-3. `NonameEventBridge`：保存父事件链、触发链和牌移动摘要，将事件字段修改记录为可重放变更日志。
+3. `NonameEventBridge`：保存父事件链、触发链和牌移动摘要，将事件字段及 `targets/directHit/excluded` 集合修改记录为有界变更日志，并可转换成权威事件补丁。
 
 三层均只处理可结构化数据，不向技能代码暴露文件系统、网络、实时时钟或服务器对象。
 
@@ -35,7 +35,7 @@ effect.moveCards({
 
 ## 尚未完成
 
-- `phaseDrawBegin2`、`useCard/useCard1/useCard2` 以及 `damageBegin1/2/3/4 → damageSource → damageEnd` 已完成“引擎暂停 → 隔离 Mod 修改/取消 → 引擎验证恢复 → 快照/基础回放”纵切；用牌目标逐个事件、濒死、判定和其余阶段中断点尚未接入。
+- `phaseDrawBegin2`、三段用牌主链、逐目标 `useCardToTarget/Playered/Targeted`、`directHit/excluded` 以及 `damageBegin1/2/3/4 → damageSource → damageEnd` 已完成权威纵切；濒死、判定和其余阶段中断点尚未接入。
 - 完整的扩展区、全局历史和事件牌移动模型。
 - 与规则无关的 AI 估值、动画和客户端广播兼容层。
 

@@ -324,3 +324,68 @@ test("高级 Mod 可在局域网权威路径修改并取消用牌事件", async 
     after.sequence,
   );
 });
+
+test("高级 Mod 可逐目标设置 directHit 并由权威伤害链结算", async () => {
+  const manager = new GameManager();
+  const state = room();
+  const pack = runtimePack(`(input) => {
+    const event = input.context.ruleEvent;
+    if (input.hook !== "ruleEvent" || !event) return {};
+    if (event.name === "useCard") {
+      const targetId = event.data.sourceId === "a" ? "b" : "a";
+      return { ruleEvent: { data: { cardName: "sha", targetIds: [targetId] } } };
+    }
+    if (event.name === "useCardToTarget") {
+      return { ruleEvent: { data: { directHitTargetIds: [event.data.targetId] } } };
+    }
+    return {};
+  }`);
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  await manager.start(state, [pack]);
+
+  while (true) {
+    const pending = state.players
+      .map((player) => manager.view(state.id, player.id).pending)
+      .find((item) => item?.kind === "selectGeneral");
+    if (!pending || pending.kind !== "selectGeneral") break;
+    await manager.action(state.id, pending.playerId, {
+      action: "chooseGeneral",
+      generalId: pending.choices[0].id,
+    });
+  }
+
+  const initial = manager.view(state.id, "a");
+  const sourceId = initial.currentPlayerId;
+  const targetId = sourceId === "a" ? "b" : "a";
+  const sourceView = manager.view(state.id, sourceId);
+  const card = sourceView.players
+    .find((player) => player.id === sourceId)
+    ?.hand?.find((item) => item.name !== "shan" && item.name !== "wuxie");
+  assert.ok(card);
+  const targetBefore = sourceView.players.find(
+    (player) => player.id === targetId,
+  )!.hp;
+
+  await manager.action(state.id, sourceId, {
+    action: "useCard",
+    cardId: card.id,
+    targetId,
+  });
+
+  const after = manager.view(state.id, sourceId);
+  assert.equal(
+    after.players.find((player) => player.id === targetId)?.hp,
+    targetBefore - 1,
+  );
+  assert.equal(after.pending, undefined);
+  assert.equal(
+    manager.replay(
+      manager.listReplays()[0].id,
+      manager.listReplays()[0].commands.length,
+    ).view.sequence,
+    after.sequence,
+  );
+});

@@ -250,6 +250,50 @@ const compatibility = new Map<
   ],
   ["event.goto", { status: "migrated", replacement: "event mutation journal" }],
   [
+    "event.targets.add",
+    { status: "shimmed", replacement: "authoritative targetIds mutation" },
+  ],
+  [
+    "event.targets.addArray",
+    { status: "shimmed", replacement: "authoritative targetIds mutation" },
+  ],
+  [
+    "event.targets.remove",
+    { status: "shimmed", replacement: "authoritative targetIds mutation" },
+  ],
+  [
+    "event.targets.removeArray",
+    { status: "shimmed", replacement: "authoritative targetIds mutation" },
+  ],
+  [
+    "event.directHit.add",
+    {
+      status: "shimmed",
+      replacement: "authoritative directHitTargetIds mutation",
+    },
+  ],
+  [
+    "event.directHit.addArray",
+    {
+      status: "shimmed",
+      replacement: "authoritative directHitTargetIds mutation",
+    },
+  ],
+  [
+    "event.excluded.add",
+    {
+      status: "shimmed",
+      replacement: "authoritative excludedTargetIds mutation",
+    },
+  ],
+  [
+    "event.excluded.addArray",
+    {
+      status: "shimmed",
+      replacement: "authoritative excludedTargetIds mutation",
+    },
+  ],
+  [
     "trigger.untrigger",
     { status: "migrated", replacement: "event mutation journal" },
   ],
@@ -394,6 +438,12 @@ export function analyzeNonameApiUsage(source: string) {
   );
   for (const match of source.matchAll(eventAliasPattern)) {
     const api = `event.${match[1]}`;
+    result.set(api, (result.get(api) ?? 0) + 1);
+  }
+  const eventCollectionPattern =
+    /\b(event|trigger)\.(targets|directHit|excluded)\.(add|addArray|remove|removeArray)\s*\(/g;
+  for (const match of source.matchAll(eventCollectionPattern)) {
+    const api = `event.${match[2]}.${match[3]}`;
     result.set(api, (result.get(api) ?? 0) + 1);
   }
   return result;

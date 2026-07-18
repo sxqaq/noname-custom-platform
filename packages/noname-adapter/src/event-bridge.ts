@@ -40,6 +40,11 @@ export interface NonameEventBridgeOptions {
   resolvePlayer?: (playerId: string) => unknown;
 }
 
+export interface NonameRuleEventPatch {
+  cancelled?: boolean;
+  data?: Record<string, unknown>;
+}
+
 /**
  * A serializable parent-linked event graph for trusted upstream skill code.
  * Every write is journaled instead of mutating the authoritative engine
@@ -48,6 +53,7 @@ export interface NonameEventBridgeOptions {
 export class NonameEventBridge {
   private readonly events = new Map<string, NonameEventRecord>();
   private readonly proxies = new Map<string, Record<string, any>>();
+  private readonly collectionProxies = new Map<string, unknown[]>();
   private readonly journal: NonameEventMutation[];
   private readonly resolvePlayer: (playerId: string) => unknown;
 
@@ -154,7 +160,10 @@ export class NonameEventBridge {
           return record.targetId
             ? bridge.resolvePlayer(record.targetId)
             : undefined;
-        return record.data?.[property];
+        const value = record.data?.[property];
+        return Array.isArray(value)
+          ? bridge.collection(eventId, property, value)
+          : value;
       },
       set(_target, property, value) {
         if (typeof property !== "string")
@@ -180,6 +189,41 @@ export class NonameEventBridge {
 
   mutations() {
     return structuredClone(this.journal);
+  }
+
+  authoritativePatch(eventId: string): NonameRuleEventPatch {
+    const record = this.requireEvent(eventId);
+    const data = record.data ?? {};
+    const patch: Record<string, unknown> = {};
+    for (const key of [
+      "num",
+      "numFixed",
+      "cardName",
+      "targetId",
+      "targetIndex",
+    ])
+      if (data[key] !== undefined) patch[key] = structuredClone(data[key]);
+    for (const [nonameKey, hostKey] of [
+      ["targets", "targetIds"],
+      ["directHit", "directHitTargetIds"],
+      ["excluded", "excludedTargetIds"],
+    ] as const) {
+      const values = data[nonameKey];
+      if (Array.isArray(values))
+        patch[hostKey] = values.map((value) => playerIdOf(value) ?? value);
+    }
+    const card = data.card;
+    if (
+      card &&
+      typeof card === "object" &&
+      "name" in card &&
+      typeof card.name === "string"
+    )
+      patch.cardName = card.name;
+    return {
+      ...(data.cancelled === true ? { cancelled: true } : {}),
+      ...(Object.keys(patch).length ? { data: patch } : {}),
+    };
   }
 
   snapshot(): NonameEventBridgeSnapshot {
@@ -222,7 +266,117 @@ export class NonameEventBridge {
     const record = this.requireEvent(eventId);
     record.data ??= {};
     record.data[key] = serializable;
+    this.collectionProxies.delete(`${eventId}:${key}`);
     this.record({ eventId, op: "set", key, value: serializable });
+  }
+
+  private collection(eventId: string, key: string, source: unknown[]) {
+    const cacheKey = `${eventId}:${key}`;
+    const cached = this.collectionProxies.get(cacheKey);
+    if (cached) return cached;
+    const playerCollection = ["targets", "directHit", "excluded"].includes(key);
+    const decode = (value: unknown) =>
+      playerCollection && typeof value === "string"
+        ? this.resolvePlayer(value)
+        : structuredClone(value);
+    const encode = (value: unknown) =>
+      playerCollection ? (playerIdOf(value) ?? value) : value;
+    const values = source.map(decode);
+    const same = (left: unknown, right: unknown) =>
+      playerCollection
+        ? playerIdOf(left) !== undefined &&
+          playerIdOf(left) === playerIdOf(right)
+        : Object.is(left, right);
+    const commit = () => {
+      const serialized = values.map(encode);
+      const record = this.requireEvent(eventId);
+      record.data ??= {};
+      record.data[key] = cloneSerializable(serialized);
+      this.record({
+        eventId,
+        op: "set",
+        key,
+        value: structuredClone(serialized),
+      });
+    };
+    const mutators = new Set([
+      "copyWithin",
+      "fill",
+      "pop",
+      "push",
+      "reverse",
+      "shift",
+      "sort",
+      "splice",
+      "unshift",
+    ]);
+    const proxy = new Proxy(values, {
+      get(target, property, receiver) {
+        if (property === "add")
+          return (value: unknown) => {
+            if (!target.some((item) => same(item, value))) {
+              target.push(value);
+              commit();
+            }
+            return proxy;
+          };
+        if (property === "addArray")
+          return (items: unknown[]) => {
+            if (!Array.isArray(items))
+              throw new Error(`${key}.addArray expects an array`);
+            let changed = false;
+            for (const item of items)
+              if (!target.some((current) => same(current, item))) {
+                target.push(item);
+                changed = true;
+              }
+            if (changed) commit();
+            return proxy;
+          };
+        if (property === "remove")
+          return (value: unknown) => {
+            const index = target.findIndex((item) => same(item, value));
+            if (index >= 0) {
+              target.splice(index, 1);
+              commit();
+            }
+            return value;
+          };
+        if (property === "removeArray")
+          return (items: unknown[]) => {
+            if (!Array.isArray(items))
+              throw new Error(`${key}.removeArray expects an array`);
+            let changed = false;
+            for (const item of items) {
+              let index = target.findIndex((current) => same(current, item));
+              while (index >= 0) {
+                target.splice(index, 1);
+                changed = true;
+                index = target.findIndex((current) => same(current, item));
+              }
+            }
+            if (changed) commit();
+            return proxy;
+          };
+        if (typeof property === "string" && mutators.has(property))
+          return (...args: unknown[]) => {
+            const result = (Array.prototype as any)[property].apply(
+              target,
+              args,
+            );
+            commit();
+            return result;
+          };
+        return Reflect.get(target, property, receiver);
+      },
+      set(target, property, value, receiver) {
+        const result = Reflect.set(target, property, value, receiver);
+        commit();
+        return result;
+      },
+    });
+    this.collectionProxies.set(cacheKey, proxy);
+    return proxy;
   }
 
   private flag(eventId: string, op: "cancel" | "finish") {
