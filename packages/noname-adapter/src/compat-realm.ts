@@ -168,7 +168,36 @@ function transformSkillModule(source: string, pack: string) {
   if (transformed === withoutImport) {
     throw new Error(`无名杀武将包 ${pack} 使用了未知的技能导出格式`);
   }
-  return `"use strict";\n${shims.join("\n")}\n${transformed}`;
+  return `"use strict";\n${createLoadTimePolyfillsSource()}\n${shims.join("\n")}\n${transformed}`;
+}
+
+/**
+ * Polyfills required by the pinned upstream declarations are installed inside
+ * the VM context. They must never modify the host process's built-ins because
+ * multiple authoritative rooms can execute compatibility modules concurrently.
+ */
+function createLoadTimePolyfillsSource() {
+  return `
+if (typeof Object.groupBy !== "function") {
+  Object.defineProperty(Object, "groupBy", {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value(items, callback) {
+      if (items == null) throw new TypeError("Object.groupBy requires an iterable");
+      if (typeof callback !== "function") throw new TypeError("Object.groupBy callback must be a function");
+      const groups = Object.create(null);
+      let index = 0;
+      for (const value of items) {
+        const rawKey = callback(value, index++);
+        const key = typeof rawKey === "symbol" ? rawKey : String(rawKey);
+        if (Object.prototype.hasOwnProperty.call(groups, key)) groups[key].push(value);
+        else groups[key] = [value];
+      }
+      return groups;
+    },
+  });
+}`;
 }
 
 function assertWithin(root: string, path: string) {

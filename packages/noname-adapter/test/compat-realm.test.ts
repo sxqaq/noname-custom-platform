@@ -78,6 +78,23 @@ test("固定提交中的全部上游武将技能包均可直接加载", async ()
   }
 });
 
+test("Node 20 兼容垫片只安装在无名杀隔离 realm", async () => {
+  const hostObject = Object as typeof Object & { groupBy?: unknown };
+  const originalHostGroupBy = hostObject.groupBy;
+  const module = await loadPinnedNonameSkillModule({
+    upstreamRoot,
+    pack: "collab",
+    seed: "node-20-polyfill",
+  });
+
+  try {
+    assert.ok(Object.keys(module.skills).length > 0);
+    assert.equal(hostObject.groupBy, originalHostGroupBy);
+  } finally {
+    module.dispose();
+  }
+});
+
 test("兼容加载器拒绝越过固定武将包目录", async () => {
   await assert.rejects(
     loadPinnedNonameSkillModule({
