@@ -116,6 +116,102 @@ test("命令与事件上下文映射实际操作者和所选目标", async () =>
   });
 });
 
+test("隔离 Mod 修改摸牌规则事件后由权威引擎验证并恢复", async () => {
+  const pack = advancedPack();
+  pack.runtime!.source = `(input) => input.hook === "ruleEvent"
+    ? ({
+        state: { eventId: input.context.ruleEvent.id },
+        ruleEvent: { data: { num: 4 } },
+      })
+    : ({})`;
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  const current = HeadlessGame.create({
+    seed: 7,
+    fixedLordId: "a",
+    externalRuleEvents: true,
+    packages: [pack],
+    players: [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ],
+  });
+  const runtime = new NonameCompatRoomRuntime([pack], "rule-event-seed");
+  const event = current.externalRuleEvent()!;
+  const player = current.state.players.find(
+    (item) => item.id === event.playerId,
+  )!;
+  const before = player.hand.length;
+
+  const resolution = await runtime.runRuleEvent(current, event, 0);
+  current.resumeExternalRuleEvent(resolution);
+
+  assert.equal(player.hand.length, before + 4);
+  assert.equal(current.state.phase, "play");
+  assert.deepEqual(runtime.snapshot().states[pack.id], { eventId: event.id });
+  assert.equal(runtime.snapshot().records.at(-1)?.hook, "ruleEvent");
+  assert.deepEqual(runtime.snapshot().records.at(-1)?.output.ruleEvent, {
+    data: { num: 4 },
+  });
+});
+
+test("没有 game-state 权限的 Mod 不能修改规则事件", async () => {
+  const pack = advancedPack();
+  pack.runtime!.permissions = [];
+  pack.runtime!.source = `() => ({ ruleEvent: { cancelled: true } })`;
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  const current = HeadlessGame.create({
+    seed: 8,
+    fixedLordId: "a",
+    externalRuleEvents: true,
+    packages: [pack],
+    players: [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ],
+  });
+  await assert.rejects(
+    new NonameCompatRoomRuntime([pack], "denied-event").runRuleEvent(
+      current,
+      current.externalRuleEvent()!,
+    ),
+    /game-state/,
+  );
+});
+
+test("规则事件暂时拒绝可能覆盖内部中断的嵌套效果", async () => {
+  const pack = advancedPack();
+  pack.runtime!.source = `() => ({ effects: [
+    { type: "damage", target: "self", amount: 1 },
+  ] })`;
+  pack.generals = [
+    { id: "test.blank_a", name: "Blank A", faction: "qun", hp: 4, skills: [] },
+    { id: "test.blank_b", name: "Blank B", faction: "qun", hp: 4, skills: [] },
+  ];
+  const current = HeadlessGame.create({
+    seed: 9,
+    fixedLordId: "a",
+    externalRuleEvents: true,
+    packages: [pack],
+    players: [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ],
+  });
+  await assert.rejects(
+    new NonameCompatRoomRuntime([pack], "nested-event").runRuleEvent(
+      current,
+      current.externalRuleEvent()!,
+    ),
+    /嵌套中断/,
+  );
+});
+
 test("高级 Mod 选择请求可快照、校验响应并无代码回放", async () => {
   const pack = advancedPack();
   pack.runtime!.permissions.push("player-choice");

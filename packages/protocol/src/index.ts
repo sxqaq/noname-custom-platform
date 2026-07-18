@@ -522,7 +522,7 @@ export interface ReplayDto {
   compatHooks?: Array<{
     index: number;
     packageId: string;
-    hook: "roomStart" | "afterCommand" | "choiceResponse";
+    hook: "roomStart" | "afterCommand" | "choiceResponse" | "ruleEvent";
     commandIndex?: number;
     inputHash: string;
     output: unknown;
