@@ -173,14 +173,16 @@ export interface Card {
   /** Effective delayed-trick name while this physical card is in judgment. */
   virtualName?: string;
 }
-export type ExternalRuleEventName =
-  | "phaseDrawBegin2"
+export type DamageRuleEventName =
   | "damageBegin1"
   | "damageBegin2"
   | "damageBegin3"
   | "damageBegin4"
   | "damageSource"
   | "damageEnd";
+export type UseCardRuleEventName = "useCard" | "useCard1" | "useCard2";
+export type ExternalRuleEventName =
+  "phaseDrawBegin2" | DamageRuleEventName | UseCardRuleEventName;
 export interface ExternalRuleEvent {
   id: string;
   name: ExternalRuleEventName;
@@ -434,13 +436,20 @@ export type PendingResponse =
         | { kind: "draw" }
         | {
             kind: "damage";
-            stage: Exclude<ExternalRuleEventName, "phaseDrawBegin2">;
+            stage: DamageRuleEventName;
             sourceId?: string;
             targetId: string;
             amount: number;
             resumePhase: "play";
             resumePending?: PendingResponse;
             causeCardId?: string;
+          }
+        | {
+            kind: "useCard";
+            stage: UseCardRuleEventName;
+            command: Extract<GameCommand, { type: "useCard" }>;
+            effectiveName: string;
+            suppressLianying: boolean;
           };
     }
   | {
@@ -1304,22 +1313,32 @@ export class HeadlessGame {
         throw new Error("No authoritative rule event is waiting");
       if (resolution.eventId !== pending.event.id)
         throw new Error("Authoritative rule event ID does not match");
-      const num = resolution.data?.num ?? pending.event.data.num;
-      const max = pending.event.name === "phaseDrawBegin2" ? 20 : 100;
-      if (!Number.isInteger(num) || Number(num) < 0 || Number(num) > max)
-        throw new Error(`Rule event count must be an integer from 0 to ${max}`);
+      const cancelled =
+        resolution.cancelled === true || resolution.data?.cancelled === true;
       delete this.state.pending;
-      if (pending.continuation.kind === "draw")
+      if (pending.continuation.kind === "draw") {
+        const num = resolution.data?.num ?? pending.event.data.num;
+        if (!Number.isInteger(num) || Number(num) < 0 || Number(num) > 20)
+          throw new Error("Rule event count must be an integer from 0 to 20");
         this.continueDrawPhase(
           this.player(pending.playerId),
           Number(num),
-          resolution.cancelled === true || resolution.data?.cancelled === true,
+          cancelled,
         );
-      else
+      } else if (pending.continuation.kind === "damage") {
+        const num = resolution.data?.num ?? pending.event.data.num;
+        if (!Number.isInteger(num) || Number(num) < 0 || Number(num) > 100)
+          throw new Error("Rule event count must be an integer from 0 to 100");
         this.continueDamageRuleEvent(
           pending.continuation,
           Number(num),
-          resolution.cancelled === true || resolution.data?.cancelled === true,
+          cancelled,
+        );
+      } else
+        this.continueUseCardRuleEvent(
+          pending.continuation,
+          resolution.data,
+          cancelled,
         );
       this.flushOptionalDraws();
       this.state.rngState = this.rng.state;
@@ -1519,7 +1538,27 @@ export class HeadlessGame {
   private useCard(
     command: Extract<GameCommand, { type: "useCard" }>,
     effectiveName?: string,
+    resumeRuleEvent = false,
   ) {
+    if (this.state.externalRuleEvents && !resumeRuleEvent) {
+      const player = this.requireTurn(command.playerId);
+      if (this.state.phase !== "play") throw new Error("当前不能出牌");
+      const card = player.hand.find((item) => item.id === command.cardId);
+      if (!card) throw new Error("手牌不存在");
+      const cardName = effectiveName ?? card.name;
+      const definition = this.cards.get(cardName);
+      if (!definition) throw new Error("卡牌定义不存在");
+      if (cardName === "shan" || cardName === "wuxie")
+        throw new Error(`${definition.name}只能用于响应`);
+      this.queueUseCardRuleEvent("useCard", {
+        kind: "useCard",
+        stage: "useCard",
+        command: structuredClone(command),
+        effectiveName: cardName,
+        suppressLianying: this.suppressLianying.has(command.cardId),
+      });
+      return;
+    }
     const player = this.requireTurn(command.playerId);
     if (this.state.phase !== "play") throw new Error("当前不能出牌");
     const card = this.takeCard(player, command.cardId);
@@ -1778,6 +1817,116 @@ export class HeadlessGame {
       "card.custom",
       `${player.name}使用了${definition.name}${selected.id !== player.id ? `，目标是${selected.name}` : ""}`,
     );
+  }
+  private queueUseCardRuleEvent(
+    stage: UseCardRuleEventName,
+    continuation: Extract<
+      Extract<PendingResponse, { kind: "externalRuleEvent" }>["continuation"],
+      { kind: "useCard" }
+    >,
+  ) {
+    const targetIds = continuation.command.targetIds?.length
+      ? continuation.command.targetIds
+      : continuation.command.targetId
+        ? [continuation.command.targetId]
+        : [];
+    const event: ExternalRuleEvent = {
+      id: `rule-${++this.state.ruleEventSequence!}`,
+      name: stage,
+      playerId: continuation.command.playerId,
+      data: {
+        cardId: continuation.command.cardId,
+        cardName: continuation.effectiveName,
+        sourceId: continuation.command.playerId,
+        targetIds: [...targetIds],
+      },
+    };
+    this.state.pending = {
+      playerId: continuation.command.playerId,
+      kind: "externalRuleEvent",
+      event,
+      continuation: { ...structuredClone(continuation), stage },
+    };
+  }
+  private continueUseCardRuleEvent(
+    continuation: Extract<
+      Extract<PendingResponse, { kind: "externalRuleEvent" }>["continuation"],
+      { kind: "useCard" }
+    >,
+    data: Record<string, unknown> | undefined,
+    cancelled: boolean,
+  ) {
+    const cardName = data?.cardName ?? continuation.effectiveName;
+    if (
+      typeof cardName !== "string" ||
+      !cardName.length ||
+      cardName.length > 128
+    )
+      throw new Error("Rule event cardName must be a non-empty string");
+    const rawTargets =
+      data?.targetIds ??
+      continuation.command.targetIds ??
+      (continuation.command.targetId ? [continuation.command.targetId] : []);
+    if (
+      !Array.isArray(rawTargets) ||
+      rawTargets.length > 8 ||
+      rawTargets.some(
+        (targetId) => typeof targetId !== "string" || !targetId.length,
+      ) ||
+      new Set(rawTargets).size !== rawTargets.length
+    )
+      throw new Error("Rule event targetIds must contain unique player IDs");
+    if (
+      data?.cardId !== undefined &&
+      data.cardId !== continuation.command.cardId
+    )
+      throw new Error("Rule event cannot replace the physical card ID");
+    if (
+      data?.sourceId !== undefined &&
+      data.sourceId !== continuation.command.playerId
+    )
+      throw new Error("Rule event cannot replace the card source");
+    const command = {
+      ...structuredClone(continuation.command),
+      targetId: undefined,
+      targetIds: rawTargets as string[],
+    };
+    if (cancelled) {
+      const source = this.requireTurn(command.playerId);
+      if (continuation.suppressLianying)
+        this.suppressLianying.add(command.cardId);
+      try {
+        this.state.discard.push(this.takeCard(source, command.cardId));
+        this.state.phase = "play";
+        this.log("card.cancelled", `${source.name}使用的牌被取消`);
+      } finally {
+        if (continuation.suppressLianying)
+          this.suppressLianying.delete(command.cardId);
+      }
+      return;
+    }
+    const next =
+      continuation.stage === "useCard"
+        ? "useCard1"
+        : continuation.stage === "useCard1"
+          ? "useCard2"
+          : undefined;
+    if (next) {
+      this.queueUseCardRuleEvent(next, {
+        ...continuation,
+        command,
+        effectiveName: cardName,
+      });
+      return;
+    }
+    if (continuation.suppressLianying)
+      this.suppressLianying.add(command.cardId);
+    try {
+      this.useCard(command, cardName, true);
+    } finally {
+      if (continuation.suppressLianying)
+        this.suppressLianying.delete(command.cardId);
+    }
   }
   private beginShaTarget(
     player: PlayerState,
@@ -3876,7 +4025,7 @@ export class HeadlessGame {
     );
   }
   private queueDamageRuleEvent(
-    stage: Exclude<ExternalRuleEventName, "phaseDrawBegin2">,
+    stage: DamageRuleEventName,
     continuation: Extract<
       Extract<PendingResponse, { kind: "externalRuleEvent" }>["continuation"],
       { kind: "damage" }

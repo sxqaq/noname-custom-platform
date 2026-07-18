@@ -169,3 +169,26 @@ test("SDK exposes the authoritative damage event chain", () => {
 
   assert.match(runtime.source, /damageBegin3/);
 });
+
+test("SDK exposes typed use-card retargeting and view-as patches", () => {
+  const runtime = defineRuntime((input) => {
+    const event = input.context.ruleEvent;
+    if (input.hook === "ruleEvent" && event?.name === "useCard2") {
+      return {
+        ruleEvent: {
+          data: {
+            cardName:
+              event.data.cardName === "tao" ? "sha" : event.data.cardName,
+            targetIds: event.data.targetIds.filter(
+              (playerId) => playerId !== event.data.sourceId,
+            ),
+          },
+        },
+      };
+    }
+    return {};
+  });
+
+  assert.match(runtime.source, /useCard2/);
+  assert.match(runtime.source, /targetIds/);
+});
