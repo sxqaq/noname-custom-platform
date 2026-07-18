@@ -1,6 +1,6 @@
 {
   "name": "@sgs/desktop",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "去中心化、可自定义内容的朋友房网页联机主机与客户端",
   "author": "Noname Custom Platform contributors",
   "private": true,
@@ -37,6 +37,21 @@
       {
         "from": "../web/dist",
         "to": "web"
+      },
+      {
+        "from": "../../vendor/noname/apps/core/character",
+        "to": "noname/apps/core/character",
+        "filter": [
+          "**/*.js"
+        ]
+      },
+      {
+        "from": "../../vendor/noname/LICENSE",
+        "to": "noname/LICENSE"
+      },
+      {
+        "from": "../../vendor/noname/README.md",
+        "to": "noname/README.md"
       }
     ],
     "asar": true,

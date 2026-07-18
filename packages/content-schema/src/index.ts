@@ -33,6 +33,7 @@ export function validatePackage(input: unknown): ValidationResult {
     errors.push("许可证须为 1–80 个字符");
   if (value.description !== undefined && value.description.length > 2000)
     errors.push("扩展说明不能超过 2000 个字符");
+  validateRuntime(value.runtime, errors);
   const dependencyIds = new Set<string>();
   value.dependencies?.forEach((dependency) => {
     if (!validId(dependency.id) || dependency.id === value.id)
@@ -694,6 +695,62 @@ function validateRuleValue(value: unknown, owner: string, errors: string[]) {
     !validId(item.key)
   )
     errors.push(`${owner} 的状态键名不合法`);
+}
+function validateRuntime(
+  runtime: ExtensionPackageDto["runtime"] | undefined,
+  errors: string[],
+) {
+  if (runtime === undefined) return;
+  if (!runtime || typeof runtime !== "object") {
+    errors.push("高级运行时声明必须是对象");
+    return;
+  }
+  if (runtime.kind !== "noname-compat")
+    errors.push("高级运行时类型不受支持");
+  if (runtime.apiVersion !== "noname-compat/v1")
+    errors.push("无名杀兼容 API 版本不受支持");
+  if (!/^[a-f0-9]{40}$/i.test(runtime.upstreamCommit))
+    errors.push("无名杀上游提交必须是 40 位 Git 提交哈希");
+  if (
+    typeof runtime.source !== "string" ||
+    !runtime.source.trim() ||
+    Buffer.byteLength(runtime.source, "utf8") > 1024 * 1024 ||
+    runtime.source.includes("\0")
+  )
+    errors.push("高级 Mod 编译源码必须为非空文本且不能超过 1 MiB");
+  const allowedPermissions = new Set([
+    "game-state",
+    "player-choice",
+    "deterministic-random",
+    "custom-ui",
+    "mode-control",
+    "ai",
+  ]);
+  if (!Array.isArray(runtime.permissions)) {
+    errors.push("高级 Mod 权限必须是数组");
+  } else {
+    const seen = new Set<string>();
+    for (const permission of runtime.permissions) {
+      if (!allowedPermissions.has(permission))
+        errors.push(`高级 Mod 权限 ${permission} 不受支持`);
+      if (seen.has(permission)) errors.push(`高级 Mod 权限 ${permission} 重复`);
+      seen.add(permission);
+    }
+  }
+  if (
+    !runtime.limits ||
+    !Number.isInteger(runtime.limits.timeoutMs) ||
+    runtime.limits.timeoutMs < 10 ||
+    runtime.limits.timeoutMs > 5000
+  )
+    errors.push("高级 Mod 单次执行超时须为 10–5000ms");
+  if (
+    !runtime.limits ||
+    !Number.isInteger(runtime.limits.memoryMb) ||
+    runtime.limits.memoryMb < 16 ||
+    runtime.limits.memoryMb > 128
+  )
+    errors.push("高级 Mod 内存上限须为 16–128MiB");
 }
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;

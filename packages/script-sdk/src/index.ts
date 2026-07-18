@@ -5,6 +5,8 @@ import type {
   ExtensionPackageDto,
   GeneralDto,
   ModeDefinitionDto,
+  NonameCompatPermissionDto,
+  NonameCompatRuntimeDto,
   RuleConditionDto,
   RuleSubjectDto,
   RuleValueDto,
@@ -12,6 +14,98 @@ import type {
   SkillDto,
   SkillModifierDto,
 } from "@sgs/protocol";
+
+export const NONAME_COMPAT_UPSTREAM_COMMIT =
+  "632d2d3c8da2893466a8c440a18861c9ed49813d";
+
+export interface RuntimeHookInput<State = unknown> {
+  apiVersion: "noname-compat/v1";
+  hook: "roomStart" | "afterCommand" | "choiceResponse";
+  hookIndex: number;
+  commandIndex?: number;
+  packageId: string;
+  state?: State;
+  game: Readonly<Record<string, unknown>>;
+  context: {
+    command?: Readonly<{
+      type: string;
+      playerId: string;
+      [key: string]: unknown;
+    }>;
+    events: ReadonlyArray<
+      Readonly<{
+        sequence: number;
+        type: string;
+        message: string;
+        [key: string]: unknown;
+      }>
+    >;
+    actorPlayerId?: string;
+    selectedPlayerId?: string;
+    choice?: {
+      requestId: string;
+      cardIds?: string[];
+      targetIds?: string[];
+      optionId?: string;
+      numberValue?: number;
+      suit?: "spade" | "heart" | "club" | "diamond";
+    };
+  };
+}
+
+export interface RuntimeHookOutput<State = unknown> {
+  state?: State;
+  effects?: EffectDto[];
+  logs?: string[];
+  request?: {
+    playerId?: string;
+    selection: SkillSelectionDto;
+  };
+}
+
+export type RuntimeHook<State = unknown> = (
+  input: RuntimeHookInput<State>,
+) => RuntimeHookOutput<State>;
+
+/**
+ * Compiles a self-contained synchronous hook into the advanced runtime manifest.
+ * The hook cannot close over imported helpers or local variables: only its input,
+ * JavaScript built-ins, and deterministic Math.random are available at runtime.
+ */
+export function defineRuntime<State = unknown>(
+  hook: RuntimeHook<State>,
+  options: {
+    permissions?: NonameCompatPermissionDto[];
+    upstreamCommit?: string;
+    timeoutMs?: number;
+    memoryMb?: number;
+  } = {},
+): NonameCompatRuntimeDto {
+  if (typeof hook !== "function")
+    throw new Error("Runtime hook must be a function");
+  const source = Function.prototype.toString.call(hook);
+  if (!source.includes("=>") && !/^\s*(?:async\s+)?function\b/.test(source))
+    throw new Error(
+      "Runtime hook must be an arrow function or function declaration",
+    );
+  if (/\[native code\]/.test(source))
+    throw new Error("Native functions cannot be used as runtime hooks");
+  return {
+    kind: "noname-compat",
+    apiVersion: "noname-compat/v1",
+    upstreamCommit: options.upstreamCommit ?? NONAME_COMPAT_UPSTREAM_COMMIT,
+    source,
+    permissions: [
+      ...new Set<NonameCompatPermissionDto>(
+        options.permissions ?? (["game-state"] as NonameCompatPermissionDto[]),
+      ),
+    ],
+    limits: {
+      timeoutMs: options.timeoutMs ?? 500,
+      memoryMb: options.memoryMb ?? 32,
+    },
+  };
+}
 
 /** 高级作者 SDK：构建可验证 DSL，不在服务器执行作者 JavaScript。 */
 export const effect = {
@@ -261,7 +355,7 @@ export function definePackage(
 export interface PluginDefinition {
   apiVersion: "sgs.plugin/v1";
   engineApi: "rules-ir/v1" | "rules-ir/v2";
-  capabilities: Array<"rules" | "assets">;
+  capabilities: Array<"rules" | "assets" | "advanced-runtime">;
   content: ExtensionPackageDto;
 }
 
@@ -269,7 +363,7 @@ export interface CompiledPlugin {
   format: "sgs-compiled-plugin";
   formatVersion: 1;
   engineApi: "rules-ir/v1" | "rules-ir/v2";
-  capabilities: Array<"rules" | "assets">;
+  capabilities: Array<"rules" | "assets" | "advanced-runtime">;
   content: ExtensionPackageDto;
 }
 
@@ -286,8 +380,21 @@ export function compilePlugin(value: PluginDefinition): CompiledPlugin {
   if (value.engineApi !== "rules-ir/v1" && value.engineApi !== "rules-ir/v2")
     throw new Error(`Unsupported rules API: ${String(value.engineApi)}`);
   const capabilities = [...new Set(value.capabilities)];
-  if (capabilities.some((item) => item !== "rules" && item !== "assets"))
+  if (
+    capabilities.some(
+      (item) =>
+        item !== "rules" && item !== "assets" && item !== "advanced-runtime",
+    )
+  )
     throw new Error("Plugin requested an unsupported capability");
+  if (value.content.runtime && !capabilities.includes("advanced-runtime"))
+    throw new Error(
+      "Plugin content includes a runtime but advanced-runtime capability is missing",
+    );
+  if (capabilities.includes("advanced-runtime") && !value.content.runtime)
+    throw new Error(
+      "Plugin requests advanced-runtime capability but defines no runtime",
+    );
   return structuredClone({
     format: "sgs-compiled-plugin",
     formatVersion: 1,

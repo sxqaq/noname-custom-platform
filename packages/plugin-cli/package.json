@@ -1,6 +1,6 @@
 {
   "name": "@sgs/plugin-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@sgs/content-schema": "*",
     "@sgs/headless-engine": "*",
+    "@sgs/noname-adapter": "*",
     "@sgs/script-sdk": "*",
     "typescript": "^5.8.3",
     "tsx": "^4.19.4"
