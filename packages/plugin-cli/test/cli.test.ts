@@ -152,3 +152,57 @@ test("plugin sandbox denies system imports and nondeterministic globals", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("Noname compatibility audit and skill migration scaffold are buildable", async () => {
+  const repository = resolve("../..");
+  const cli = resolve("dist/index.js");
+  const root = await mkdtemp(resolve(repository, ".tmp-noname-migration-"));
+  try {
+    const reportPath = join(root, "compatibility.json");
+    const audit = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "audit-noname",
+        "--upstream",
+        resolve(repository, "vendor/noname"),
+        "--out",
+        reportPath,
+      ],
+      { cwd: repository, encoding: "utf8", timeout: 20_000 },
+    );
+    assert.equal(audit.status, 0, audit.stderr);
+    const report = JSON.parse(await readFile(reportPath, "utf8"));
+    assert.ok(report.packCount >= 20);
+    assert.ok(report.summary.unsupported > 0);
+
+    const migrated = join(root, "fanjian.ts");
+    const migrate = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "migrate-noname",
+        "standard",
+        "fanjian",
+        "--upstream",
+        resolve(repository, "vendor/noname"),
+        "--out",
+        migrated,
+      ],
+      { cwd: repository, encoding: "utf8", timeout: 20_000 },
+    );
+    assert.equal(migrate.status, 0, migrate.stderr);
+    assert.match(await readFile(migrated, "utf8"), /player\.gainPlayerCard/);
+    const output = join(root, "fanjian.sgs.json");
+    const build = spawnSync(
+      process.execPath,
+      [cli, "build", migrated, "--out", output],
+      { cwd: repository, encoding: "utf8", timeout: 20_000 },
+    );
+    assert.equal(build.status, 0, build.stderr);
+    const compiled = JSON.parse(await readFile(output, "utf8"));
+    assert.equal(compiled.content.runtime.apiVersion, "noname-compat/v1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -133,6 +133,8 @@ npm.cmd run installer:win
 
 代码作者使用 `@sgs/script-sdk` 编写 TypeScript，再用 `@sgs/plugin-cli` 编译并测试。普通能力生成规则 IR；复杂能力可用 `defineRuntime()` 进入房主的隔离权威运行时，远程玩家浏览器始终不执行作者源码。模板、命令和信任边界见 [插件 SDK](docs/plugin-sdk.md)。
 
+复用真实无名杀技能时，先运行 API 审计或迁移骨架命令；26 个官方技能包都能无 DOM 加载，但尚不能宣称全部技能可完整执行。当前分级与高频缺口见 [无名杀 API 兼容矩阵](docs/noname-api-matrix.md)。
+
 插件有三种创作层级：
 
 1. 网页表单：适合武将资料、卡面和基础效果；
@@ -164,7 +166,7 @@ node scripts/e2e-smoke.mjs
 node scripts/e2e-content.mjs
 ```
 
-当前验收结果：150 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、玩家选择、断线重连和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，确定性摘要为 `a36c6fb3…96fefe`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
+当前验收结果：153 项工作区测试通过；真实双客户端局域网 E2E 覆盖高级 Mod 分发、权威钩子、玩家选择、断线重连和一致状态广播；Windows x64 NSIS 安装器构建通过。10,000 局 2–8 人 AI 对局全部结束、零死锁，确定性摘要为 `a36c6fb3…96fefe`。详细内容见 [自由创作系统](docs/creative-system.md)、[去中心化路线图](docs/decentralized-node-roadmap.md)、[标准身份局验收](docs/standard-content-progress.md)和[阶段验收](docs/acceptance.md)。
 
 ## 安全与数据说明
 

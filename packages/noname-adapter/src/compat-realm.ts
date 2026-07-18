@@ -132,13 +132,34 @@ class LoadedSkillModule implements PinnedNonameSkillModule {
 }
 
 function transformSkillModule(source: string, pack: string) {
-  const withoutImport = source.replace(
+  let withoutImport = source.replace(
     /import\s+\{[^}]+\}\s+from\s+["']noname["'];\s*/,
     "",
   );
   if (withoutImport === source) {
     throw new Error(`无名杀武将包 ${pack} 使用了未知的核心导入格式`);
   }
+  const shims: string[] = [];
+  const withoutDedent = withoutImport.replace(
+    /import\s+html\s+from\s+["']dedent["'];\s*/,
+    "",
+  );
+  if (withoutDedent !== withoutImport) {
+    withoutImport = withoutDedent;
+    shims.push(
+      `const html = (strings, ...values) => String.raw({ raw: strings }, ...values).replace(/^\\n|\\n\\s*$/g, "");`,
+    );
+  }
+  const withoutCards = withoutImport.replace(
+    /import\s+cards\s+from\s+["']\.\.\/sp2\/card\.js["'];\s*/,
+    "",
+  );
+  if (withoutCards !== withoutImport) {
+    withoutImport = withoutCards;
+    shims.push("const cards = Object.freeze(Object.create(null));");
+  }
+  if (/^\s*import\s/m.test(withoutImport))
+    throw new Error(`无名杀武将包 ${pack} 使用了未知的额外模块导入`);
 
   const transformed = withoutImport.replace(
     /export\s+default\s+skills\s*;\s*$/,
@@ -147,7 +168,7 @@ function transformSkillModule(source: string, pack: string) {
   if (transformed === withoutImport) {
     throw new Error(`无名杀武将包 ${pack} 使用了未知的技能导出格式`);
   }
-  return `"use strict";\n${transformed}`;
+  return `"use strict";\n${shims.join("\n")}\n${transformed}`;
 }
 
 function assertWithin(root: string, path: string) {
@@ -175,7 +196,11 @@ function createSeededRandom(seed: string): SeededRandom {
     },
     snapshot: () => state,
     restore(nextState) {
-      if (!Number.isInteger(nextState) || nextState < 0 || nextState > 0xffff_ffff) {
+      if (
+        !Number.isInteger(nextState) ||
+        nextState < 0 ||
+        nextState > 0xffff_ffff
+      ) {
         throw new Error("无名杀兼容随机状态不合法");
       }
       state = nextState || 1;

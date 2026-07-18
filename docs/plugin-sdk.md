@@ -55,6 +55,8 @@ sgs-plugin init [directory] [--advanced]
 sgs-plugin build [entry] --out [file]
 sgs-plugin watch [entry] --out [file]
 sgs-plugin test [entry]
+sgs-plugin audit-noname [--upstream path] [--out report.json]
+sgs-plugin migrate-noname <pack> <skill> [--upstream path] [--out plugin.ts]
 ```
 
 独立 npm 分发包发布后，也可以用 `npx @sgs/plugin-cli` 调用相同命令。在此之前，仓库内开发应使用上面的 `node packages/plugin-cli/dist/index.js` 形式，避免依赖尚未发布的 npm 包。

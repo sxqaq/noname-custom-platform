@@ -41,8 +41,9 @@ test("真实技能中的 Math.random 由可快照种子随机源驱动", async (
     pack: "standard",
     seed: "same-seed",
   });
-  const check = (module: Awaited<ReturnType<typeof loadPinnedNonameSkillModule>>) =>
-    module.skills.ganglie.check?.({ source: undefined }, {}) as boolean;
+  const check = (
+    module: Awaited<ReturnType<typeof loadPinnedNonameSkillModule>>,
+  ) => module.skills.ganglie.check?.({ source: undefined }, {}) as boolean;
 
   assert.deepEqual(
     [check(first), check(first), check(first)],
@@ -57,13 +58,12 @@ test("真实技能中的 Math.random 由可快照种子随机源驱动", async (
   second.dispose();
 });
 
-test("无额外模块依赖的上游武将包均可直接加载", async () => {
+test("固定提交中的全部上游武将技能包均可直接加载", async () => {
   const characterRoot = resolve(upstreamRoot, "apps/core/character");
   const entries = await readdir(characterRoot, { withFileTypes: true });
   const packs = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .filter((name) => !["offline", "xianding"].includes(name))
     .sort();
 
   assert.ok(packs.length >= 20);

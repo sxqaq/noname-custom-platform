@@ -26,7 +26,7 @@ npm.cmd run installer:win
 
 ## 已执行的本机验收
 
-版本 `0.2.0` 已完成以下闭环：
+版本 `0.3.0` 已完成以下闭环：
 
 1. 构建 x64 NSIS assisted installer；
 2. 静默安装到干净临时目录；
@@ -35,4 +35,4 @@ npm.cmd run installer:win
 5. 主机正常关闭并释放端口；
 6. 静默卸载，确认安装目录中的程序文件被删除。
 
-2026-07-17 最近一次本地完整构建已确认包含 326 个固定上游武将规则 JavaScript 文件及许可证，安装器 SHA-256：`1CFC8EBE5A8DFA5DFC1BD6DE253D4C4BBA67E6E0D6F95B389A5ED466EB59949B`。构建产物已在提交前从工作区清理，正式二进制由 GitHub 标签发布工作流重新生成并附加到 Release。未配置商业代码签名证书，因此公开下载时 Windows SmartScreen 仍可能提示未知发布者。
+2026-07-17 的 0.3.0 本地完整构建已确认包含 326 个固定上游武将规则 JavaScript 文件及许可证；打包后的 `NonameCustomPlatform.exe --smoke-test` 启动内置主机、通过 `/health` 并以 0 退出。安装器大小 109,160,894 字节，SHA-256：`FE8F758A8F63ACE8C458E12BD4CF1BDA1E499D2F748AA34738D46FA12A7E9D92`。本地产物在验收后从工作区清理，正式二进制由 GitHub 标签发布工作流重新生成并附加到 Release。未配置商业代码签名证书，因此公开下载时 Windows SmartScreen 仍可能提示未知发布者。
